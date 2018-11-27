@@ -359,7 +359,7 @@ func archreloc(ctxt *ld.Link, r *sym.Reloc, s *sym.Symbol, val int64) (int64, bo
 		return int64(o1)<<32 | int64(o0), true
 	case objabi.R_ARM64_TLS_LE:
 		r.Done = false
-		if ctxt.HeadType == objabi.Hdarwin {
+		if ctxt.HeadType != objabi.Hlinux && ctxt.HeadType == objabi.Hdarwin && ctxt.HeadType != objabi.Hfreebsd {
 			ld.Errorf(s, "TLS reloc on unsupported OS %v", ctxt.HeadType)
 		}
 		// The TCB is two pointers. This is not documented anywhere, but is
