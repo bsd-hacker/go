@@ -5,8 +5,8 @@
 #include "textflag.h"
 
 TEXT _rt0_arm64_freebsd(SB),NOSPLIT|NOFRAME,$0
-	MOVD	0(RSP), R0	// argc
-	ADD	$8, RSP, R1	// argv
+	ADD	$8, R0, R1	// argv
+	MOVW	0(R0), R0	// argc
 	BL	main(SB)
 
 // When building with -buildmode=c-shared, this symbol is called when the shared
@@ -35,7 +35,7 @@ TEXT _rt0_arm64_freebsd_lib(SB),NOSPLIT,$184
 	// Initialize g as null in case of using g later e.g. sigaction in cgo_sigaction.go
 	MOVD	ZR, g
 
-	MOVD	R0, _rt0_arm64_freebsd_lib_argc<>(SB)
+	MOVW	R0, _rt0_arm64_freebsd_lib_argc<>(SB)
 	MOVD	R1, _rt0_arm64_freebsd_lib_argv<>(SB)
 
 	// Synchronous initialization.
@@ -82,13 +82,13 @@ restore:
 	RET
 
 TEXT _rt0_arm64_freebsd_lib_go(SB),NOSPLIT,$0
-	MOVD	_rt0_arm64_freebsd_lib_argc<>(SB), R0
+	MOVW	_rt0_arm64_freebsd_lib_argc<>(SB), R0
 	MOVD	_rt0_arm64_freebsd_lib_argv<>(SB), R1
 	MOVD	$runtime·rt0_go(SB),R4
 	B       (R4)
 
-DATA _rt0_arm64_freebsd_lib_argc<>(SB)/8, $0
-GLOBL _rt0_arm64_freebsd_lib_argc<>(SB),NOPTR, $8
+DATA _rt0_arm64_freebsd_lib_argc<>(SB)/4, $0
+GLOBL _rt0_arm64_freebsd_lib_argc<>(SB),NOPTR, $4
 DATA _rt0_arm64_freebsd_lib_argv<>(SB)/8, $0
 GLOBL _rt0_arm64_freebsd_lib_argv<>(SB),NOPTR, $8
 
@@ -97,7 +97,7 @@ TEXT main(SB),NOSPLIT|NOFRAME,$0
 	MOVD	$runtime·rt0_go(SB), R2
 	BL	(R2)
 exit:
-	MOVD $0, R0
+	MOVD	$0, R0
 	MOVD	$1, R8	// SYS_exit
 	SVC
 	B	exit

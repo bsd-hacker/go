@@ -56,9 +56,9 @@ TEXT runtime·sys_umtx_op(SB),NOSPLIT,$0
 	RET
 
 TEXT runtime·thr_new(SB),NOSPLIT,$0
-	MOVD param+0(FP), R0
-	MOVW size+8(FP), R1
-	MOVD $SYS_thr_new, R8
+	MOVD	param+0(FP), R0
+	MOVW	size+8(FP), R1
+	MOVD	$SYS_thr_new, R8
 	SVC
 	MOVW	R0, ret+16(FP)
 	RET
