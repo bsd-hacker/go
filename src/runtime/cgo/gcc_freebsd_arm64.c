@@ -92,14 +92,14 @@ threadentry(void *v)
 void
 x_cgo_init(G *g, void (*setg)(void*), void **tlsg, void **tlsbase)
 {
-	pthread_attr_t *attr;
+	pthread_attr_t attr;
 	size_t size;
 
 	setg_gcc = setg;
-	pthread_attr_init(attr);
-	pthread_attr_getstacksize(attr, &size);
-	g->stacklo = (uintptr)&size - size + 4096;
-	pthread_attr_destroy(attr);
+	pthread_attr_init(&attr);
+	pthread_attr_getstacksize(&attr, &size);
+	g->stacklo = (uintptr)&attr - size + 4096;
+	pthread_attr_destroy(&attr);
 	free(attr);
 
 	inittls(tlsg, (void**)((uintptr)tlsbase & ~7));
