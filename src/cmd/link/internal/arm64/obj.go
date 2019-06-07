@@ -86,7 +86,7 @@ func archinit(ctxt *ld.Link) {
 
 	case objabi.Hlinux, /* arm64 elf */
 		objabi.Hnetbsd,
-		objabi.Hopenbsd:
+		objabi.Hopenbsd,
 		objabi.Hfreebsd:
 		ld.Elfinit(ctxt)
 		ld.HEADR = ld.ELFRESERVE
