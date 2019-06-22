@@ -41,22 +41,69 @@ TODO
 <h2 id="language">Changes to the language</h2>
 
 <p>
-TODO
+  Per the <a href="https://github.com/golang/proposal/blob/master/design/19308-number-literals.md">number literal proposal</a>,
+  Go 1.13 supports a more uniform and modernized set of number literal prefixes.
+  <ul>
+    <li>
+      <a href="https://golang.org/ref/spec#Integer_literals">Binary integer literals</a>:
+      The prefix <code>0b</code> or <code>0B</code> indicates a binary integer literal
+      such as <code>0b1011</code>.
+    </li>
+
+    <li>
+      <a href="https://golang.org/ref/spec#Integer_literals">Octal integer literals</a>:
+      The prefix <code>0o</code> or <code>0O</code> indicates an octal integer literal
+      such as <code>0o660</code>.
+      The existing octal notation indicated by a leading <code>0</code> followed by
+      octal digits remains valid.
+    </li>
+
+    <li>
+      <a href="https://golang.org/ref/spec#Floating-point_literals">Hexadecimal floating point literals</a>:
+      The prefix <code>0x</code> or <code>0X</code> may now be used to express the mantissa of a
+      floating-point number in hexadecimal format such as <code>0x1.0p-1021</code>.
+      A hexadecimal floating-point number must always have an exponent, written as the letter
+      <code>p</code> or <code>P</code> followed by an exponent in decimal. The exponent scales
+      the mantissa by 2 to the power of the exponent.
+    </li>
+
+    <li>
+      <a href="https://golang.org/ref/spec#Imaginary_literals">Imaginary literals</a>:
+      The imaginary suffix <code>i</code> may now be used with any (binary, decimal, hexadecimal)
+      integer or floating-point literal.
+    </li>
+
+    <li>
+      Digit separators:
+      The digits of any number literal may now be separated (grouped) using underscores, such as
+      in <code>1_000_000</code>, <code>0b_1010_0110</code>, or <code>3.1415_9265</code>.
+      An underscore may appear between any two digits or the literal prefix and the first digit.
+    </li>
+  </ul>
 </p>
 
-<p><!-- CL 158719 -->
-  TODO: <a href="https://golang.org/cl/158797">https://golang.org/cl/158797</a>: implement shifts by signed amounts
+<p>
+  Per the <a href="https://github.com/golang/proposal/blob/master/design/19113-signed-shift-counts.md">signed shift counts proposal</a>
+  Go 1.13 removes the restriction that a <a href="https://golang.org/ref/spec#Operators">shift count</a>
+  must be unsigned. This change eliminates the need for many artificial <code>uint</code> conversions,
+  solely introduced to satisfy this (now removed) restriction of the <code>&lt;&lt;</code> and <code>&gt;&gt;</code> operators.
+</p>
+
+<p>
+  These language changes were implemented by changes to the compiler, and corresponding internal changes to the library
+  packages <code><a href="#go/scanner">go/scanner</a></code> and
+  <code><a href="#text/scanner">text/scanner</a></code> (number literals),
+  and <code><a href="#go/types">go/types</a></code> (signed shift counts).
+</p>
+
+<p>
+  If your code uses modules and your <code>go.mod</code> files specifies a language version, be sure
+  it is set to at least <code>1.13</code> to get access to these language changes.
+  You can do this by editing the <code>go.mod</code> file directly, or you can run
+  <code>go mod edit -go=1.13</code>.
 </p>
 
 <h2 id="ports">Ports</h2>
-
-<p>
-TODO
-</p>
-
-<p><!-- CL 174457 -->
-  TODO: <a href="https://golang.org/cl/174457">https://golang.org/cl/174457</a>: add new GOOS=illumos, split out of GOOS=solaris
-</p>
 
 <h3 id="android">Android</h3>
 
@@ -81,16 +128,95 @@ TODO
   FreeBSD 12.0 or later requires a kernel with the COMPAT_FREEBSD11 option set (this is the default).
 </p>
 
-<h3 id="aix-ppc64">AIX on PPC64</h3>
+<h3 id="illumos">Illumos</h3>
 
-<p><!-- CL 164003 -->
-  AIX on PPC64 now supports cgo and external linking.
+<p><!-- CL 174457 -->
+  Go now supports Illumos with <code>GOOS=illumos</code>.
+  The <code>illumos</code> build tag implies the <code>solaris</code>
+  build tag.
+</p>
+
+<h3 id="aix">AIX</h3>
+
+<p><!-- CL 164003, CL 169120 -->
+  AIX on PPC64 (<code>aix/ppc64</code>) now supports cgo, external
+  linking, and the <code>c-archive</code> and <code>pie</code> build
+  modes.
+</p>
+
+<h3 id="windows">Windows</h3>
+
+<p><!-- CL 178977 -->
+  The Windows version specified by internally-linked Windows binaries
+  is now Windows 7 rather than NT 4.0. This was already the minimum
+  required version for Go, but can affect the behavior of system calls
+  that have a backwards-compatibility mode. These will now behave as
+  documented. Externally-linked binaries (any program using cgo) have
+  always specified a more recent Windows version.
 </p>
 
 <h2 id="tools">Tools</h2>
 
 <p>
 TODO
+</p>
+
+<h3 id="modules">Modules</h3>
+
+<h4 id="version-validation">Version validation</h4><!-- CL 181881 -->
+
+<p>
+  When extracting a module from a version control system, the <code>go</code>
+  command now performs additional validation on the requested version string.
+</p>
+
+<p>
+  The <code>+incompatible</code> version annotation bypasses the requirement
+  of <a href="/cmd/go/#hdr-Module_compatibility_and_semantic_versioning">semantic
+  import versioning</a> for repositories that predate the introduction of
+  modules. The <code>go</code> command now verifies that such a version does not
+  include an explicit <code>go.mod</code> file.
+</p>
+
+<p>
+  The <code>go</code> command now verifies the mapping
+  between <a href="/cmd/go#hdr-Pseudo_versions">pseudo-versions</a> and
+  version-control metadata. Specifically:
+  <ul>
+    <li>The version prefix must be derived from a tag on the named revision or
+    one of its ancestors, or be of the form <code>vX.0.0</code>.</li>
+
+    <li>The date string must match the UTC timestamp of the revision.</li>
+
+    <li>The short name of the revision must use the same number of characters as
+    what the <code>go</code> command would generate. (For SHA-1 hashes as used
+    by <code>git</code>, a 12-digit prefix.)</li>
+  </ul>
+</p>
+
+<p>
+  If the main module directly requires a version that fails the above
+  validation, a corrected version can be obtained by redacting the version to
+  just the commit hash and re-running a <code>go</code> command such as <code>go
+  list -m all</code> or <code>go mod tidy</code>. For example,
+  <pre>require github.com/docker/docker v1.14.0-0.20190319215453-e7b5f7dbe98c</pre>
+      can be redacted to
+  <pre>require github.com/docker/docker e7b5f7dbe98c</pre>
+  which resolves to
+  <pre>require github.com/docker/docker v0.7.3-0.20190319215453-e7b5f7dbe98c</pre>
+</p>
+
+<p>
+  If the main module has a transitive requirement on a version that fails
+  validation, the invalid version can still be replaced with a valid one through
+  the use of a <a href="/cmd/go/#hdr-The_go_mod_file"><code>replace</code>
+  directive</a> in the <code>go.mod</code> file of
+  the <a href="/cmd/go/#hdr-The_main_module_and_the_build_list">main module</a>.
+  If the replacement is a commit hash, it will be resolved to the appropriate
+  pseudo-version. For example,
+  <pre>replace github.com/docker/docker v1.14.0-0.20190319215453-e7b5f7dbe98c => github.com/docker/docker e7b5f7dbe98c</pre>
+  resolves to
+  <pre>replace github.com/docker/docker v1.14.0-0.20190319215453-e7b5f7dbe98c => github.com/docker/docker v0.7.3-0.20190319215453-e7b5f7dbe98c</pre>
 </p>
 
 <h3 id="compiler">Compiler toolchain</h3>
@@ -114,6 +240,48 @@ TODO
   The compiler no longer emits floating point or complex constants
   to <code>go_asm.h</code> files. These have always been emitted in a
   form that could not be used as numeric constant in assembly code.
+</p>
+
+<h3 id="assembler">Assembler</h3>
+
+<p><!-- CL 157001 -->
+  The assembler now supports many of the atomic instructions
+  introduced in ARM v8.1.
+</p>
+
+<h3 id="gofmt">gofmt</h3>
+
+<p>
+  <code>gofmt</code> (and with that <code>go fmt</code>) now canonicalizes
+  number literal prefixes and exponents to use lower-case letters, but
+  leaves hexadecimal digits alone. This improves readability when using the new octal prefix
+  (<code>0O</code> becomes <code>0o</code>), and the rewrite is applied consistently.
+  <code>gofmt</code> now also removes unnecessary leading zeroes from a decimal integer
+  imaginary literal. (For backwards-compatibility, an integer imaginary literal
+  starting with <code>0</code> is considered a decimal, not an octal number.
+  Removing superfluous leading zeroes avoids potential confusion.)
+  For instance, <code>0B1010</code>, <code>0XabcDEF</code>, <code>0O660</code>,
+  <code>1.2E3</code>, and <code>01i</code> become <code>0b1010</code>, <code>0xabcDEF</code>,
+  <code>0o660</code>, <code>1.2e3</code>, and <code>1i</code> after applying <code>gofmt</code>.
+</p>
+
+<h3 id="godoc"><code>godoc</code> and <code>go</code> <code>doc</code></h3>
+
+<p><!-- CL 174322 -->
+  The <code>godoc</code> webserver is no longer included in the main binary distribution.
+  To run the <code>godoc</code> webserver locally, manually install it first:
+<pre>
+go get golang.org/x/tools/cmd/godoc
+godoc
+</pre>
+</p>
+
+<p><!-- CL 177797 -->
+  The
+  <a href="/cmd/go/#hdr-Show_documentation_for_package_or_symbol"><code>go</code> <code>doc</code></a>
+  command now always includes the package clause in its output, except for
+  commands. This replaces the previous behavior where a heuristic was used,
+  causing the package clause to be omitted under certain conditions.
 </p>
 
 <h2 id="runtime">Runtime</h2>
@@ -184,7 +352,6 @@ TODO
 </p>
 
 <!-- CL 174125: https://golang.org/cl/174125: cmd/dist: add support for openbsd/arm64 -->
-<!-- CL 177797: https://golang.org/cl/177797: cmd/doc: always print package clause except for commands -->
 <!-- CL 173345: https://golang.org/cl/173345: cmd/go: add -trimpath build flag -->
 <!-- CL 173438: https://golang.org/cl/173438: cmd/go: change -tags to a comma-separated list -->
 <!-- CL 175983: https://golang.org/cl/175983: cmd/go: set the "generate" build tag in go generate, per design doc -->
@@ -263,7 +430,28 @@ TODO
       type attribute, code will now be interperted as <a href="https://html.spec.whatwg.org/multipage/scripting.html#the-script-element:module-script-2">JavaScript module script</a>.
     </p>
 
-</dl><!-- html/template -->
+  </dl><!-- html/template -->
+
+<dl id="go/scanner"><dt><a href="/pkg/go/scanner/">go/scanner</a></dt>
+  <dd>
+    <p><!-- CL 175218 -->
+      The scanner has been updated to recognize the new Go number literals, specifically
+      binary literals with <code>0b</code>/<code>0B</code> prefix, octal literals with <code>0o</code>/<code>0O</code> prefix,
+      and floating-point numbers with hexadecimal mantissa. The imaginary suffix <code>i</code> may now be used with any number
+      literal, and underscores may used as digit separators for grouping.
+      See the <a href="#language">Changes to the language</a> for details.
+  </p>
+
+  </dl><!-- go/scanner -->
+
+<dl id="go/types"><dt><a href="/pkg/go/types/">go/types</a></dt>
+  <dd>
+    <p>
+      The type-checker has been updated to follow the new rules for integer shifts.
+      See the <a href="#language">Changes to the language</a> for details.
+    </p>
+
+</dl><!-- go/types -->
 
 <dl id="log"><dt><a href="/pkg/log/">log</a></dt>
   <dd>
@@ -445,24 +633,30 @@ TODO
 <dl id="testing"><dt><a href="/pkg/testing/">testing</a></dt>
   <dd>
     <p><!-- CL 112155 -->
-      TODO: <a href="https://golang.org/cl/112155">https://golang.org/cl/112155</a>: stop rounding b.N
+      When running benchmarks, <a href="/pkg/testing/#B.N"><code>B.N</code></a> is no longer rounded.
     </p>
 
     <p><!-- CL 166717 -->
-      TODO: <a href="https://golang.org/cl/166717">https://golang.org/cl/166717</a>: add B.ReportMetric for custom benchmark metrics
+      The new method <a href="/pkg/testing/#B.ReportMetric"><code>B.ReportMetric</code></a> lets users report
+      custom benchmark metrics and override built-in metrics.
     </p>
 
     <p><!-- CL 173722 -->
-      TODO: <a href="https://golang.org/cl/173722">https://golang.org/cl/173722</a>: delay flag registration; move to an Init function
+      Testing flags are now registered in the new <a href="/pkg/testing/#Init"><code>Init</code></a> function.
+      As a result, testing flags are now only registered when running a test binary.
     </p>
 
 </dl><!-- testing -->
 
 <dl id="text/scanner"><dt><a href="/pkg/text/scanner/">text/scanner</a></dt>
   <dd>
-    <p><!-- CL 163079 -->
-      The new <a href="/pkg/text/scanner/#AllowNumberbars"><code>AllowNumberbars</code></a>
-      mode allows number literals to contain underbars as digit separators.
+    <p><!-- CL 183077 -->
+      The scanner has been updated to recognize the new Go number literals, specifically
+      binary literals with <code>0b</code>/<code>0B</code> prefix, octal literals with <code>0o</code>/<code>0O</code> prefix,
+      and floating-point numbers with hexadecimal mantissa.
+      Also, the new <a href="/pkg/text/scanner/#AllowDigitSeparators"><code>AllowDigitSeparators</code></a>
+      mode allows number literals to contain underscores as digit separators (off by default for backwards-compatibility).
+      See the <a href="#language">Changes to the language</a> for details.
     </p>
 
 </dl><!-- text/scanner -->

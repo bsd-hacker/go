@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"cmd/go/internal/base"
+	"cmd/go/internal/cfg"
 	"cmd/go/internal/lockedfile"
 	"cmd/go/internal/modfetch/codehost"
 	"cmd/go/internal/module"
@@ -215,29 +216,21 @@ func (r *cachingRepo) Latest() (*RevInfo, error) {
 	return &info, nil
 }
 
-func (r *cachingRepo) GoMod(rev string) ([]byte, error) {
+func (r *cachingRepo) GoMod(version string) ([]byte, error) {
 	type cached struct {
 		text []byte
 		err  error
 	}
-	c := r.cache.Do("gomod:"+rev, func() interface{} {
-		file, text, err := readDiskGoMod(r.path, rev)
+	c := r.cache.Do("gomod:"+version, func() interface{} {
+		file, text, err := readDiskGoMod(r.path, version)
 		if err == nil {
 			// Note: readDiskGoMod already called checkGoMod.
 			return cached{text, nil}
 		}
 
-		// Convert rev to canonical version
-		// so that we use the right identifier in the go.sum check.
-		info, err := r.Stat(rev)
-		if err != nil {
-			return cached{nil, err}
-		}
-		rev = info.Version
-
-		text, err = r.r.GoMod(rev)
+		text, err = r.r.GoMod(version)
 		if err == nil {
-			checkGoMod(r.path, rev, text)
+			checkGoMod(r.path, version, text)
 			if err := writeDiskGoMod(file, text); err != nil {
 				fmt.Fprintf(os.Stderr, "go: writing go.mod cache: %v\n", err)
 			}
@@ -385,8 +378,29 @@ var errNotCached = fmt.Errorf("not in cache")
 func readDiskStat(path, rev string) (file string, info *RevInfo, err error) {
 	file, data, err := readDiskCache(path, rev, "info")
 	if err != nil {
-		if file, info, err := readDiskStatByHash(path, rev); err == nil {
-			return file, info, nil
+		// If the cache already contains a pseudo-version with the given hash, we
+		// would previously return that pseudo-version without checking upstream.
+		// However, that produced an unfortunate side-effect: if the author added a
+		// tag to the repository, 'go get' would not pick up the effect of that new
+		// tag on the existing commits, and 'go' commands that referred to those
+		// commits would use the previous name instead of the new one.
+		//
+		// That's especially problematic if the original pseudo-version starts with
+		// v0.0.0-, as was the case for all pseudo-versions during vgo development,
+		// since a v0.0.0- pseudo-version has lower precedence than pretty much any
+		// tagged version.
+		//
+		// In practice, we're only looking up by hash during initial conversion of a
+		// legacy config and during an explicit 'go get', and a little extra latency
+		// for those operations seems worth the benefit of picking up more accurate
+		// versions.
+		//
+		// Fall back to this resolution scheme only if the GOPROXY setting prohibits
+		// us from resolving upstream tags.
+		if cfg.GOPROXY == "off" {
+			if file, info, err := readDiskStatByHash(path, rev); err == nil {
+				return file, info, nil
+			}
 		}
 		return file, nil, err
 	}
@@ -436,13 +450,23 @@ func readDiskStatByHash(path, rev string) (file string, info *RevInfo, err error
 	if err != nil {
 		return "", nil, errNotCached
 	}
+
+	// A given commit hash may map to more than one pseudo-version,
+	// depending on which tags are present on the repository.
+	// Take the highest such version.
+	var maxVersion string
 	suffix := "-" + rev + ".info"
+	err = errNotCached
 	for _, name := range names {
-		if strings.HasSuffix(name, suffix) && IsPseudoVersion(strings.TrimSuffix(name, ".info")) {
-			return readDiskStat(path, strings.TrimSuffix(name, ".info"))
+		if strings.HasSuffix(name, suffix) {
+			v := strings.TrimSuffix(name, ".info")
+			if IsPseudoVersion(v) && semver.Max(maxVersion, v) == v {
+				maxVersion = v
+				file, info, err = readDiskStat(path, strings.TrimSuffix(name, ".info"))
+			}
 		}
 	}
-	return "", nil, errNotCached
+	return file, info, err
 }
 
 // oldVgoPrefix is the prefix in the old auto-generated cached go.mod files.
