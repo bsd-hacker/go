@@ -42,6 +42,8 @@ if [ "$BOOTSTRAP_FORMAT" != "mintgz" -a "$BOOTSTRAP_FORMAT" != "" ]; then
 	exit 2
 fi
 
+TAR=${TAR:-tar}
+
 unset GOROOT
 src=$(cd .. && pwd)
 echo "#### Copying to $targ"
@@ -106,7 +108,7 @@ if [ "$BOOTSTRAP_FORMAT" = "mintgz" ]; then
 	find . -type l -exec rm {} \;
 
 	echo "Writing ${OUTGZ} ..."
-	tar cf - . | gzip -9 > ../$OUTGZ
+	${TAR} cf - . | gzip -9 > ../$OUTGZ
 	cd ..
 	ls -l "$(pwd)/$OUTGZ"
 	exit 0
@@ -116,6 +118,6 @@ echo ----
 echo Bootstrap toolchain for "$GOOS/$GOARCH" installed in "$(pwd)".
 echo Building tbz.
 cd ..
-tar cf - "go-${GOOS}-${GOARCH}-bootstrap" | bzip2 -9 >"go-${GOOS}-${GOARCH}-bootstrap.tbz"
+${TAR} cf - "go-${GOOS}-${GOARCH}-bootstrap" | bzip2 -9 >"go-${GOOS}-${GOARCH}-bootstrap.tbz"
 ls -l "$(pwd)/go-${GOOS}-${GOARCH}-bootstrap.tbz"
 exit 0
