@@ -329,7 +329,7 @@ TEXT runtime·osyield(SB),NOSPLIT|NOFRAME,$0
 	SVC
 	RET
 
-TEXT runtime·sigprocmask(SB),NOSPLIT|NOFRAME,$0-28
+TEXT runtime·sigprocmask(SB),NOSPLIT|NOFRAME,$0-24
 	MOVD	how+0(FP), R0
 	MOVD	new+8(FP), R1
 	MOVD	old+16(FP), R2
