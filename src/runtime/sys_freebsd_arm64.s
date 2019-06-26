@@ -259,10 +259,6 @@ TEXT runtime·sigtramp(SB),NOSPLIT,$24
 	BL	(R0)
 	RET
 
-TEXT runtime·cgoSigtramp(SB),NOSPLIT,$0
-	MOVD	$runtime·sigtramp(SB), R3
-	B	(R3)
-
 TEXT runtime·mmap(SB),NOSPLIT|NOFRAME,$0
 	MOVD	addr+0(FP), R0
 	MOVD	n+8(FP), R1
