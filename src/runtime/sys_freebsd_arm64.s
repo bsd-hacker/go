@@ -290,12 +290,13 @@ TEXT runtime·munmap(SB),NOSPLIT|NOFRAME,$0
 cool:
 	RET
 
-TEXT runtime·madvise(SB),NOSPLIT|NOFRAME,$0
+TEXT runtime·madvise(SB),NOSPLIT|NOFRAME,$0-28
 	MOVD	addr+0(FP), R0
 	MOVD	n+8(FP), R1
 	MOVW	flags+16(FP), R2
 	MOVD	$SYS_madvise, R8
 	SVC
+	MOVW	R0, ret+24(FP)
 	// ignore failure - maybe pages are locked
 	RET
 
