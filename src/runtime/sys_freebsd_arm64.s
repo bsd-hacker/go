@@ -48,7 +48,7 @@ TEXT runtime·sys_umtx_op(SB),NOSPLIT,$0
 	MOVW mode+8(FP), R1
 	MOVW val+12(FP), R2
 	MOVD uaddr1+16(FP), R3
-	MOVD uaddr2+24(FP), R4
+	MOVD ut+24(FP), R4
 	MOVD $SYS__umtx_op, R8
 	SVC
 	SUB $20, R13
