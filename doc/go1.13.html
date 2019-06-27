@@ -34,10 +34,6 @@ Do not send CLs removing the interior tags from such phrases.
   different ones.
 </p>
 
-<p>
-TODO
-</p>
-
 <h2 id="language">Changes to the language</h2>
 
 <p>
@@ -105,6 +101,14 @@ TODO
 
 <h2 id="ports">Ports</h2>
 
+<h3 id="aix">AIX</h3>
+
+<p><!-- CL 164003, CL 169120 -->
+  AIX on PPC64 (<code>aix/ppc64</code>) now supports cgo, external
+  linking, and the <code>c-archive</code> and <code>pie</code> build
+  modes.
+</p>
+
 <h3 id="android">Android</h3>
 
 <p><!-- CL 170127 -->
@@ -136,12 +140,16 @@ TODO
   build tag.
 </p>
 
-<h3 id="aix">AIX</h3>
+<h3 id="netbsd">NetBSD</h3>
 
-<p><!-- CL 164003, CL 169120 -->
-  AIX on PPC64 (<code>aix/ppc64</code>) now supports cgo, external
-  linking, and the <code>c-archive</code> and <code>pie</code> build
-  modes.
+<p><!--CL 155739 -->
+  Go now supports NetBSD on arm64.
+</p>
+
+<h3 id="openbsd">OpenBSD</h3>
+
+<p><!--CL 174125 -->
+  Go now supports OpenBSD on arm64.
 </p>
 
 <h3 id="windows">Windows</h3>
@@ -157,11 +165,118 @@ TODO
 
 <h2 id="tools">Tools</h2>
 
-<p>
-TODO
+<h3 id="modules">Modules</h3>
+
+<h4 id="proxy-vars">Environment variables</h4>
+
+<p><!-- CL 176580 -->
+  The <a href="/cmd/go/#hdr-Module_support"><code>GO111MODULE</code></a>
+  environment variable continues to default to <code>auto</code>, but
+  the <code>auto</code> setting now activates the module-aware mode of
+  the <code>go</code> command whenever the current working directory contains,
+  or is below a directory containing, a <code>go.mod</code> file — even if the
+  current directory is within <code>GOPATH/src</code>. This change simplifies
+  the migration of existing code within <code>GOPATH/src</code> and the ongoing
+  maintenance of module-aware packages alongside non-module-aware importers.
 </p>
 
-<h3 id="modules">Modules</h3>
+<p><!-- CL 181719 -->
+  The new
+  <a href="/cmd/go/#hdr-Module_configuration_for_non_public_modules"><code>GOPRIVATE</code></a>
+  environment variable indicates module paths that are not publicly available.
+  It serves as the default value for the lower-level <code>GONOPROXY</code>
+  and <code>GONOSUMDB</code> variables, which provide finer-grained control over
+  which modules are fetched via proxy and verified using the checksum database.
+</p>
+
+<p><!-- CL 173441, CL 177958 -->
+  The <a href="/cmd/go/#hdr-Module_downloading_and_verification"><code>GOPROXY</code>
+  environment variable</a> may now be set to a comma-separated list of proxy
+  URLs or the special token <code>direct</code>, and
+  its <a href="#introduction">default value</a> is
+  now <code>https://proxy.golang.org,direct</code>. When resolving a package
+  path to its containing module, the <code>go</code> command will try all
+  candidate module paths on each proxy in the list in succession. An unreachable
+  proxy or HTTP status code other than 404 or 410 terminates the search without
+  consulting the remaining proxies.
+</p>
+
+<p>
+  The new
+  <a href="/cmd/go/#hdr-Module_authentication_failures"><code>GOSUMDB</code></a>
+  environment variable identifies the name, and optionally the public key and
+  server URL, of the database to consult for checksums of modules that are not
+  yet listed in the main module's <code>go.sum</code> file.
+  If <code>GOSUMDB</code> does not include an explicit URL, the URL is chosen by
+  probing the <code>GOPROXY</code> URLs for an endpoint indicating support for
+  the checksum database, falling back to a direct connection to the named
+  database if it is not supported by any proxy. If <code>GOSUMDB</code> is set
+  to <code>off</code>, the checksum database is not consulted and only the
+  existing checksums in the <code>go.sum</code> file are verified.
+</p>
+
+<p>
+  Users who cannot reach the default proxy and checksum database (for example,
+  due to a firewalled or sandboxed configuration) may disable their use by
+  setting <code>GOPROXY</code> to <code>direct</code>, and/or
+  <code>GOSUMDB</code> to <code>off</code>.
+  <a href="#go-env-w"><code>go</code> <code>env</code> <code>-w</code></a>
+  can be used to set the default values for these variables independent of
+  platform:
+</p>
+<pre>
+go env -w GOPROXY=direct
+go env -w GOSUMDB=off
+</pre>
+
+<h4 id="go-get"><code>go</code> <code>get</code></h3>
+
+<p><!-- CL 174099 -->
+  In module-aware mode,
+  <a href="/cmd/go/#hdr-Add_dependencies_to_current_module_and_install_them"><code>go</code> <code>get</code></a>
+  with the <code>-u</code> flag now updates a smaller set of modules that is
+  more consistent with the set of packages updated by
+  <code>go</code> <code>get</code> <code>-u</code> in GOPATH mode.
+  <code>go</code> <code>get</code> <code>-u</code> continues to update the
+  modules and packages named on the command line, but additionally updates only
+  the modules containing the packages <em>imported by</em> the named packages,
+  rather than the transitive module requirements of the modules containing the
+  named packages.
+</p>
+
+<p>
+  Note in particular that <code>go</code> <code>get</code> <code>-u</code>
+  (without additional arguments) now updates only the transitive imports of the
+  package in the current directory. To instead update all of the packages
+  transitively imported by the main module (including test dependencies), use
+  <code>go</code> <code>get</code> <code>-u</code> <code>all</code>.
+</p>
+
+<p><!-- CL 177879 -->
+  As a result of the above changes to
+  <code>go</code> <code>get</code> <code>-u</code>, the
+  <code>go</code> <code>get</code> subcommand no longer supports
+  the <code>-m</code> flag, which caused <code>go</code> <code>get</code> to
+  stop before loading packages. The <code>-d</code> flag remains supported, and
+  continues to cause <code>go</code> <code>get</code> to stop after downloading
+  the source code needed to build dependencies of the named packages.
+</p>
+
+<p><!-- CL 177677 -->
+  By default, <code>go</code> <code>get</code> <code>-u</code> in module mode
+  upgrades only non-test dependencies, as in GOPATH mode. It now also accepts
+  the <code>-t</code> flag, which (as in GOPATH mode)
+  causes <code>go</code> <code>get</code> to include the packages imported
+  by <em>tests of</em> the packages named on the command line.
+</p>
+
+<p><!-- CL 167747 -->
+  In module-aware mode, the <code>go</code> <code>get</code> subcommand now
+  supports the version suffix <code>@patch</code>. The <code>@patch</code>
+  suffix indicates that the named module, or module containing the named
+  package, should be updated to the highest patch release with the same
+  major and minor versions as the version found in the build list.
+</p>
 
 <h4 id="version-validation">Version validation</h4><!-- CL 181881 -->
 
@@ -195,28 +310,81 @@ TODO
 </p>
 
 <p>
-  If the main module directly requires a version that fails the above
-  validation, a corrected version can be obtained by redacting the version to
-  just the commit hash and re-running a <code>go</code> command such as <code>go
-  list -m all</code> or <code>go mod tidy</code>. For example,
-  <pre>require github.com/docker/docker v1.14.0-0.20190319215453-e7b5f7dbe98c</pre>
-      can be redacted to
-  <pre>require github.com/docker/docker e7b5f7dbe98c</pre>
-  which resolves to
-  <pre>require github.com/docker/docker v0.7.3-0.20190319215453-e7b5f7dbe98c</pre>
+  If a <code>require</code> directive in the
+  <a href="/cmd/go/#hdr-The_main_module_and_the_build_list">main module</a> uses
+  an invalid pseudo-version, it can usually be corrected by redacting the
+  version to just the commit hash and re-running a <code>go</code> command, such
+  as <code>go</code> <code>list</code> <code>-m</code> <code>all</code>
+  or <code>go</code> <code>mod</code> <code>tidy</code>. For example,
 </p>
+<pre>require github.com/docker/docker v1.14.0-0.20190319215453-e7b5f7dbe98c</pre>
+<p>can be redacted to</p>
+<pre>require github.com/docker/docker e7b5f7dbe98c</pre>
+<p>which currently resolves to</p>
+<pre>require github.com/docker/docker v0.7.3-0.20190319215453-e7b5f7dbe98c</pre>
 
 <p>
-  If the main module has a transitive requirement on a version that fails
-  validation, the invalid version can still be replaced with a valid one through
-  the use of a <a href="/cmd/go/#hdr-The_go_mod_file"><code>replace</code>
-  directive</a> in the <code>go.mod</code> file of
-  the <a href="/cmd/go/#hdr-The_main_module_and_the_build_list">main module</a>.
-  If the replacement is a commit hash, it will be resolved to the appropriate
-  pseudo-version. For example,
-  <pre>replace github.com/docker/docker v1.14.0-0.20190319215453-e7b5f7dbe98c => github.com/docker/docker e7b5f7dbe98c</pre>
-  resolves to
-  <pre>replace github.com/docker/docker v1.14.0-0.20190319215453-e7b5f7dbe98c => github.com/docker/docker v0.7.3-0.20190319215453-e7b5f7dbe98c</pre>
+  If one of the transitive dependencies of the main module requires an invalid
+  version or pseudo-version, the invalid version can be replaced with a valid
+  one using a
+  <a href="/cmd/go/#hdr-The_go_mod_file"><code>replace</code> directive</a> in
+  the <code>go.mod</code> file of the main module. If the replacement is a
+  commit hash, it will be resolved to the appropriate pseudo-version as above.
+  For example,
+</p>
+<pre>replace github.com/docker/docker v1.14.0-0.20190319215453-e7b5f7dbe98c => github.com/docker/docker e7b5f7dbe98c</pre>
+<p>currently resolves to</p>
+<pre>replace github.com/docker/docker v1.14.0-0.20190319215453-e7b5f7dbe98c => github.com/docker/docker v0.7.3-0.20190319215453-e7b5f7dbe98c</pre>
+
+<h3 id="go-command">Go command</h3>
+
+<p id="go-env-w"><!-- CL 171137 -->
+  The <a href="/cmd/go/#hdr-Environment_variables"><code>go</code> <code>env</code></a>
+  command now accepts a <code>-w</code> flag to set the per-user default value
+  of an enviroment variable recognized by the
+  <code>go</code> command, and a corresponding <code>-u</code> flag to unset a
+  previously-set default. Defaults set via
+  <code>go</code> <code>env</code> <code>-w</code> are stored in the
+  <code>go/env</code> file within
+  <a href="/pkg/os/#UserConfigDir"><code>os.UserConfigDir()</code></a>.
+</p>
+
+<p id="go-version-exe"><!-- CL 173343 -->
+  The <a href="/cmd/go/#hdr-Print_Go_version">
+  <code>go</code> <code>version</code></a> command now accepts arguments naming
+  executables and directories. When invoked on an executable,
+  <code>go</code> <code>version</code> prints the version of Go used to build
+  the executable. If the <code>-m</code> flag is used,
+  <code>go</code> <code>version</code> prints the executable's embedded module
+  version information, if available. When invoked on a directory,
+  <code>go</code> <code>version</code> prints information about executables
+  contained in the directory and its subdirectories.
+</p>
+
+<p id="trimpath"><!-- CL 173345 -->
+  The new <a href="/cmd/go/#hdr-Compile_packages_and_dependencies"><code>go</code>
+  <code>build</code> flag</a> <code>-trimpath</code> removes all file system paths
+  from the compiled executable, to improve build reproducibility.
+</p>
+
+<p id="comma-separated-tags"><!-- CL 173438 -->
+  The <code>go</code> <code>build</code> flag <code>-tags</code> now takes a
+  comma-separated list of build tags, to allow for multiple tags in
+  <a href="/cmd/go/#hdr-Environment_variables"><code>GOFLAGS</code></a>. The
+  space-separated form is deprecated but still recognized and will be maintained.
+</p>
+
+<p id="go-generate-tag"><!-- CL 175983 -->
+  <a href="/cmd/go/#hdr-Generate_Go_files_by_processing_source"><code>go</code>
+  <code>generate</code></a> now sets the <code>generate</code> build tag so that
+  files may be searched for directives but ignored during build.
+</p>
+
+<p id="binary-only"><!-- CL 165746 -->
+  As <a href="/doc/go1.12#binary-only">announced</a> in the Go 1.12 release
+  notes, binary-only packages are no longer supported. Building a binary-only
+  package (marked with a <code>//go:binary-only-package</code> comment) now
+  results in an error.
 </p>
 
 <h3 id="compiler">Compiler toolchain</h3>
@@ -310,10 +478,6 @@ godoc
 
 <h2 id="library">Core library</h2>
 
-<p>
-TODO generally
-</p>
-
 <h3 id="tls_1_3">TLS 1.3</h3>
 
 <p>
@@ -347,22 +511,8 @@ TODO generally
   in mind.
 </p>
 
-<p>
-TODO
-</p>
-
-<!-- CL 174125: https://golang.org/cl/174125: cmd/dist: add support for openbsd/arm64 -->
-<!-- CL 173345: https://golang.org/cl/173345: cmd/go: add -trimpath build flag -->
-<!-- CL 173438: https://golang.org/cl/173438: cmd/go: change -tags to a comma-separated list -->
-<!-- CL 175983: https://golang.org/cl/175983: cmd/go: set the "generate" build tag in go generate, per design doc -->
-<!-- CL 167747: https://golang.org/cl/167747: 'go get' in module mode now supports the version suffix '@patch'.: cmd/go/internal/modget: support the suffix '@patch' in 'go get' -->
-
 <dl id="bytes"><dt><a href="/pkg/bytes/">bytes</a></dt>
   <dd>
-    <p><!-- CL 161760 -->
-      TODO: <a href="https://golang.org/cl/161760">https://golang.org/cl/161760</a>: hoist error creation out of function
-    </p>
-
     <p>
       The new <a href="/pkg/bytes/#ToValidUTF8"><code>ToValidUTF8</code></a> function returns a
       copy of a given byte slice with each run of invalid UTF-8 byte sequences replaced by a given slice.
@@ -396,6 +546,11 @@ TODO
       and <a href="/pkg/crypto/x509/#ParsePKIXPublicKey"><code>ParsePKIXPublicKey</code></a> functions.
     </p>
 
+    <p><!-- CL 169238 -->
+      The paths searched for system roots now include <code>/etc/ssl/cert.pem</code>
+      to support the default location in Alpine Linux 3.7+.
+    </p>
+
 </dl><!-- crypto/x509 -->
 
 <dl id="database/sql"><dt><a href="/pkg/database/sql/">database/sql</a></dt>
@@ -422,6 +577,24 @@ TODO
     </p>
 
 </dl><!-- debug/dwarf -->
+
+<dl id="errors"><dt><a href="/pkg/errors/">errors</a></dt>
+  <dd>
+    <!-- CL 163558 -->
+    <p>
+      The new function <a href="/pkg/errors/#As"><code>As</code></a> finds the first error in a given error’s chain
+      that matches a given target’s type, and if so, sets the target to that error value.
+    </p>
+    <p>
+      The new function <a href="/pkg/errors/#Is"><code>Is</code></a> reports whether a given error value matches an
+      error in another’s chain.
+    </p>
+    <p>
+      The new function <a href="/pkg/errors/#Unwrap"><code>Unwrap</code></a> returns the result of calling
+      <code>Unwrap</code> on a given error, if one exists.
+    </p>
+
+</dl><!-- errors -->
 
 <dl id="html/template"><dt><a href="/pkg/html/template/">html/template</a></dt>
   <dd>
@@ -464,11 +637,11 @@ TODO
 <dl id="math/big"><dt><a href="/pkg/math/big/">math/big</a></dt>
   <dd>
     <p><!-- CL 160682 -->
-      TODO: <a href="https://golang.org/cl/160682">https://golang.org/cl/160682</a>: implement Rat.SetUint64
+      The new <a href="/pkg/math/big/#Rat.SetUint64"><code>Rat.SetUint64</code></a> method sets the <code>Rat</code> to a <code>uint64</code> value.
     </p>
 
     <p><!-- CL 168237 -->
-      TODO: <a href="https://golang.org/cl/168237">https://golang.org/cl/168237</a>: accept non-decimal floats with Rat.SetString
+      <a href="/pkg/math/big/#Rat.SetString"><code>Rat.SetString</code></a> now accepts non-decimal floating point representations.
     </p>
 
 </dl><!-- math/big -->
