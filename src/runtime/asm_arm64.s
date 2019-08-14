@@ -1312,3 +1312,28 @@ TEXT runtime·panicSlice3CU(SB),NOSPLIT,$0-16
 	MOVD	R0, x+0(FP)
 	MOVD	R1, y+8(FP)
 	JMP	runtime·goPanicSlice3CU(SB)
+
+// func getisar0() uint64
+TEXT runtime·getisar0(SB),NOSPLIT,$0
+	// get Instruction Set Attributes 0 into x0
+	// mrs x0, ID_AA64ISAR0_EL1 = d5380600
+	WORD	$0xd5380600
+	MOVD	R0, ret+0(FP)
+	RET
+
+// func getisar1() uint64
+TEXT runtime·getisar1(SB),NOSPLIT,$0
+	// get Instruction Set Attributes 1 into x0
+	// mrs x0, ID_AA64ISAR1_EL1 = d5380620
+	WORD	$0xd5380620
+	MOVD	R0, ret+0(FP)
+	RET
+
+// func getpfr0() uint64
+TEXT runtime·getpfr0(SB),NOSPLIT,$0
+	// get Processor Feature Register 0 into x0
+	// mrs x0, ID_AA64PFR0_EL1 = d5380400
+	WORD	$0xd5380400
+	MOVD	R0, ret+0(FP)
+	RET
+

@@ -394,6 +394,7 @@ const (
 )
 
 func sysauxv(auxv []uintptr) {
+	archauxv(_AT_HWCAP, 0)
 	for i := 0; auxv[i] != _AT_NULL; i += 2 {
 		tag, val := auxv[i], auxv[i+1]
 		switch tag {
