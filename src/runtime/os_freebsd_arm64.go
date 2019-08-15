@@ -8,10 +8,6 @@ package runtime
 
 import "internal/cpu"
 
-func getisar0() uint64
-func getisar1() uint64
-func getpfr0() uint64
-
 const (
 	hwcap_FP       = 1 << 0
 	hwcap_ASIMD    = 1 << 1
