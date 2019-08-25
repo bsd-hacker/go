@@ -667,6 +667,24 @@ godoc
 
 <dl id="fmt"><dt><a href="/pkg/fmt/">fmt</a></dt>
   <dd>
+    <!-- CL 160245 -->
+    <p>
+      The printing verbs <code>%x</code> and <code>%X</code> now format floating-point and
+      complex numbers in hexadecimal notation, in lower-case and upper-case respectively.
+    </p>
+
+    <!-- CL 160246 -->
+    <p>
+      The new printing verb <code>%O</code> formats integers in base 8, emitting the <code>0o</code> prefix.
+    </p>
+
+    <!-- CL 160247 -->
+    <p>
+      The scanner now accepts hexadecimal floating-point values, digit-separating underscores
+      and leading <code>0b</code> and <code>0o</code> prefixes.
+      See the <a href="#language">Changes to the language</a> for details.
+    </p>
+
     <!-- CL 176998 -->
     <p>The <a href="/pkg/fmt/#Errorf"><code>Errorf</code></a> function
       has a new verb, <code>%w</code>, whose operand must be an error.
@@ -900,19 +918,19 @@ godoc
 
 </dl><!-- runtime -->
 
-<dl id="strconv"><dt><a href="/pkg/strconv">strconv</a></dt>
+<dl id="strconv"><dt><a href="/pkg/strconv/">strconv</a></dt>
   <dd>
     <p><!-- CL 160243 -->
-       For <a href="/pkg/math/big/#strconv.ParseFloat"><code>strconv.ParseFloat</code></a>,
-       <a href="/pkg/math/big/#strconv.ParseInt"><code>strconv.ParseInt</code></a>
-       and <a href="/pkg/math/big/#strconv.ParseUint"><code>strconv.ParseUint</code></a>,
+       For <a href="/pkg/strconv/#ParseFloat"><code>strconv.ParseFloat</code></a>,
+       <a href="/pkg/strconv/#ParseInt"><code>strconv.ParseInt</code></a>
+       and <a href="/pkg/strconv/#ParseUint"><code>strconv.ParseUint</code></a>,
        if base is 0, underscores may be used between digits for readability.
        See the <a href="#language">Changes to the language</a> for details.
     </p>
 
 </dl><!-- strconv -->
 
-<dl id="strings"><dt><a href="/pkg/strings">strings</a></dt>
+<dl id="strings"><dt><a href="/pkg/strings/">strings</a></dt>
   <dd>
     <p><!-- CL 142003 -->
       The new <a href="/pkg/strings/#ToValidUTF8"><code>ToValidUTF8</code></a> function returns a
