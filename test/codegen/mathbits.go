@@ -208,6 +208,7 @@ func RotateLeft64(n uint64) uint64 {
 
 func RotateLeft32(n uint32) uint32 {
 	// amd64:"ROLL" 386:"ROLL"
+	// arm:`MOVW\tR[0-9]+@>23`
 	// arm64:"RORW"
 	// ppc64:"ROTLW"
 	// ppc64le:"ROTLW"
@@ -244,6 +245,7 @@ func RotateLeftVariable64(n uint64, m int) uint64 {
 }
 
 func RotateLeftVariable32(n uint32, m int) uint32 {
+	// arm:`MOVW\tR[0-9]+@>R[0-9]+`
 	// amd64:"ROLL"
 	// arm64:"RORW"
 	// ppc64:"ROTLW"
@@ -296,7 +298,6 @@ func TrailingZeros32(n uint32) int {
 
 func TrailingZeros16(n uint16) int {
 	// amd64:"BSFL","BTSL\\t\\$16"
-	// 386:"BSFL\t"
 	// arm:"ORR\t\\$65536","CLZ",-"MOVHU\tR"
 	// arm64:"ORR\t\\$65536","RBITW","CLZW",-"MOVHU\tR",-"RBIT\t",-"CLZ\t"
 	// s390x:"FLOGR","OR\t\\$65536"
