@@ -456,8 +456,7 @@ func typecheck1(n *Node, top int) (res *Node) {
 			t = types.NewArray(r.Type, bound)
 		}
 
-		n.Op = OTYPE
-		n.Type = t
+		setTypeNode(n, t)
 		n.Left = nil
 		n.Right = nil
 		if !t.IsDDDArray() {
@@ -480,8 +479,8 @@ func typecheck1(n *Node, top int) (res *Node) {
 		if r.Type.NotInHeap() {
 			yyerror("go:notinheap map value not allowed")
 		}
-		n.Op = OTYPE
-		n.Type = types.NewMap(l.Type, r.Type)
+
+		setTypeNode(n, types.NewMap(l.Type, r.Type))
 		mapqueue = append(mapqueue, n) // check map keys when all types are settled
 		n.Left = nil
 		n.Right = nil
@@ -497,37 +496,23 @@ func typecheck1(n *Node, top int) (res *Node) {
 		if l.Type.NotInHeap() {
 			yyerror("chan of go:notinheap type not allowed")
 		}
-		t := types.NewChan(l.Type, n.TChanDir())
-		n.Op = OTYPE
-		n.Type = t
+
+		setTypeNode(n, types.NewChan(l.Type, n.TChanDir()))
 		n.Left = nil
 		n.ResetAux()
 
 	case OTSTRUCT:
 		ok |= Etype
-		n.Op = OTYPE
-		n.Type = tostruct(n.List.Slice())
-		if n.Type == nil || n.Type.Broke() {
-			n.Type = nil
-			return n
-		}
+		setTypeNode(n, tostruct(n.List.Slice()))
 		n.List.Set(nil)
 
 	case OTINTER:
 		ok |= Etype
-		n.Op = OTYPE
-		n.Type = tointerface(n.List.Slice())
-		if n.Type == nil {
-			return n
-		}
+		setTypeNode(n, tointerface(n.List.Slice()))
 
 	case OTFUNC:
 		ok |= Etype
-		n.Op = OTYPE
-		n.Type = functype(n.Left, n.List.Slice(), n.Rlist.Slice())
-		if n.Type == nil {
-			return n
-		}
+		setTypeNode(n, functype(n.Left, n.List.Slice(), n.Rlist.Slice()))
 		n.Left = nil
 		n.List.Set(nil)
 		n.Rlist.Set(nil)
@@ -543,8 +528,7 @@ func typecheck1(n *Node, top int) (res *Node) {
 		}
 		if l.Op == OTYPE {
 			ok |= Etype
-			n.Op = OTYPE
-			n.Type = types.NewPtr(l.Type)
+			setTypeNode(n, types.NewPtr(l.Type))
 			// Ensure l.Type gets dowidth'd for the backend. Issue 20174.
 			// Don't checkwidth [...] arrays, though, since they
 			// will be replaced by concrete-sized arrays. Issue 20333.
@@ -774,6 +758,13 @@ func typecheck1(n *Node, top int) (res *Node) {
 
 		t = l.Type
 		if iscmp[n.Op] {
+			// TIDEAL includes complex constant, but only OEQ and ONE are defined for complex,
+			// so check that the n.op is available for complex  here before doing evconst.
+			if !okfor[n.Op][TCOMPLEX128] && (Isconst(l, CTCPLX) || Isconst(r, CTCPLX)) {
+				yyerror("invalid operation: %v (operator %v not defined on untyped complex)", n, n.Op)
+				n.Type = nil
+				return n
+			}
 			evconst(n)
 			t = types.Idealbool
 			if n.Op != OLITERAL {
@@ -3507,7 +3498,6 @@ func typecheckdeftype(n *Node) {
 		defer tracePrint("typecheckdeftype", n)(nil)
 	}
 
-	n.Type.Sym = n.Sym
 	n.SetTypecheck(1)
 	n.Name.Param.Ntype = typecheck(n.Name.Param.Ntype, Etype)
 	t := n.Name.Param.Ntype.Type
@@ -3683,9 +3673,8 @@ func typecheckdef(n *Node) {
 			defercheckwidth()
 		}
 		n.SetWalkdef(1)
-		n.Type = types.New(TFORW)
-		n.Type.Nod = asTypesNode(n)
-		n.Type.Sym = n.Sym // TODO(gri) this also happens in typecheckdeftype(n) - where should it happen?
+		setTypeNode(n, types.New(TFORW))
+		n.Type.Sym = n.Sym
 		nerrors0 := nerrors
 		typecheckdeftype(n)
 		if n.Type.Etype == TFORW && nerrors > nerrors0 {
@@ -3950,4 +3939,11 @@ func deadcodeexpr(n *Node) *Node {
 		}
 	}
 	return n
+}
+
+// setTypeNode sets n to an OTYPE node representing t.
+func setTypeNode(n *Node, t *types.Type) {
+	n.Op = OTYPE
+	n.Type = t
+	n.Type.Nod = asTypesNode(n)
 }
