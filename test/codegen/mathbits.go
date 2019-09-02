@@ -213,6 +213,7 @@ func RotateLeft32(n uint32) uint32 {
 	// ppc64:"ROTLW"
 	// ppc64le:"ROTLW"
 	// s390x:"RLL"
+	// wasm:"I32Rotl"
 	return bits.RotateLeft32(n, 9)
 }
 
@@ -232,6 +233,7 @@ func RotateLeftVariable(n uint, m int) uint {
 	// ppc64:"ROTL"
 	// ppc64le:"ROTL"
 	// s390x:"RLLG"
+	// wasm:"I64Rotl"
 	return bits.RotateLeft(n, m)
 }
 
@@ -241,6 +243,7 @@ func RotateLeftVariable64(n uint64, m int) uint64 {
 	// ppc64:"ROTL"
 	// ppc64le:"ROTL"
 	// s390x:"RLLG"
+	// wasm:"I64Rotl"
 	return bits.RotateLeft64(n, m)
 }
 
@@ -251,6 +254,7 @@ func RotateLeftVariable32(n uint32, m int) uint32 {
 	// ppc64:"ROTLW"
 	// ppc64le:"ROTLW"
 	// s390x:"RLL"
+	// wasm:"I32Rotl"
 	return bits.RotateLeft32(n, m)
 }
 
@@ -298,6 +302,7 @@ func TrailingZeros32(n uint32) int {
 
 func TrailingZeros16(n uint16) int {
 	// amd64:"BSFL","BTSL\\t\\$16"
+	// 386:"BSFL\t"
 	// arm:"ORR\t\\$65536","CLZ",-"MOVHU\tR"
 	// arm64:"ORR\t\\$65536","RBITW","CLZW",-"MOVHU\tR",-"RBIT\t",-"CLZ\t"
 	// s390x:"FLOGR","OR\t\\$65536"
