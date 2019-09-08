@@ -173,12 +173,15 @@ func (ctxt *Link) DynlinkingGo() bool {
 	if !ctxt.Loaded {
 		panic("DynlinkingGo called before all symbols loaded")
 	}
-	return ctxt.BuildMode == BuildModeShared || ctxt.linkShared || ctxt.BuildMode == BuildModePlugin || ctxt.CanUsePlugins()
+	return ctxt.BuildMode == BuildModeShared || ctxt.linkShared || ctxt.BuildMode == BuildModePlugin || ctxt.canUsePlugins
 }
 
 // CanUsePlugins reports whether a plugins can be used
 func (ctxt *Link) CanUsePlugins() bool {
-	return ctxt.Syms.ROLookup("plugin.Open", sym.SymVerABIInternal) != nil
+	if !ctxt.Loaded {
+		panic("CanUsePlugins called before all symbols loaded")
+	}
+	return ctxt.canUsePlugins
 }
 
 // UseRelro reports whether to make use of "read only relocations" aka
@@ -594,6 +597,9 @@ func (ctxt *Link) loadlib() {
 
 	// We've loaded all the code now.
 	ctxt.Loaded = true
+
+	// Record whether we can use plugins.
+	ctxt.canUsePlugins = (ctxt.Syms.ROLookup("plugin.Open", sym.SymVerABIInternal) != nil)
 
 	// If there are no dynamic libraries needed, gcc disables dynamic linking.
 	// Because of this, glibc's dynamic ELF loader occasionally (like in version 2.13)
@@ -1256,7 +1262,7 @@ func (ctxt *Link) hostlink() {
 		// from the beginning of the section (like sym.STYPE).
 		argv = append(argv, "-Wl,-znocopyreloc")
 
-		if ctxt.Arch.InFamily(sys.ARM, sys.ARM64) {
+		if ctxt.Arch.InFamily(sys.ARM, sys.ARM64) && (objabi.GOOS == "linux" || objabi.GOOS == "android") {
 			// On ARM, the GNU linker will generate COPY relocations
 			// even with -znocopyreloc set.
 			// https://sourceware.org/bugzilla/show_bug.cgi?id=19962
