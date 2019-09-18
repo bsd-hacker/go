@@ -704,8 +704,7 @@ const (
 	// statements
 	OBLOCK    // { List } (block of code)
 	OBREAK    // break [Sym]
-	OCASE     // case Left or List[0]..List[1]: Nbody (select case after processing; Left==nil and List==nil means default)
-	OXCASE    // case List: Nbody (select case before processing; List==nil means default)
+	OCASE     // case List: Nbody (List==nil means default)
 	OCONTINUE // continue [Sym]
 	ODEFER    // defer Left (Left must be call)
 	OEMPTY    // no-op (empty statement)
@@ -727,8 +726,8 @@ const (
 	OGO     // go Left (Left must be call)
 	ORANGE  // for List = range Right { Nbody }
 	ORETURN // return List
-	OSELECT // select { List } (List is list of OXCASE or OCASE)
-	OSWITCH // switch Ninit; Left { List } (List is a list of OXCASE or OCASE)
+	OSELECT // select { List } (List is list of OCASE)
+	OSWITCH // switch Ninit; Left { List } (List is a list of OCASE)
 	OTYPESW // Left = Right.(type) (appears as .Left of OSWITCH)
 
 	// types
