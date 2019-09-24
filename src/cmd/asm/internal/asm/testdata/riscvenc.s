@@ -95,6 +95,17 @@ TEXT asmtest(SB),DUPOK|NOSPLIT,$0
 	SB	$0, X5, X6				// 23005300
 	SB	$4, X5, X6				// 23025300
 
+        // 5.2: Integer Computational Instructions (RV64I)
+	ADDIW	$1, X5, X6				// 1b831200
+	SLLIW	$1, X5, X6				// 1b931200
+	SRLIW	$1, X5, X6				// 1bd31200
+	SRAIW	$1, X5, X6				// 1bd31240
+	ADDW	X5, X6, X7				// bb035300
+	SLLW	X5, X6, X7				// bb135300
+	SRLW	X5, X6, X7				// bb535300
+	SUBW	X5, X6, X7				// bb035340
+	SRAW	X5, X6, X7				// bb535340
+
 	// 5.3: Load and Store Instructions (RV64I)
 	LD	$0, X5, X6				// 03b30200
 	LD	$4, X5, X6				// 03b34200
@@ -115,6 +126,19 @@ TEXT asmtest(SB),DUPOK|NOSPLIT,$0
 	DIVUW	X5, X6, X7				// bb535302
 	REMW	X5, X6, X7				// bb635302
 	REMUW	X5, X6, X7				// bb735302
+
+	// 10.1: Base Counters and Timers
+	RDCYCLE		X5				// f32200c0
+	RDTIME		X5				// f32210c0
+	RDINSTRET	X5				// f32220c0
+
+	// Privileged ISA
+
+	// 3.2.1: Environment Call and Breakpoint
+	ECALL						// 73000000
+	SCALL						// 73000000
+	EBREAK						// 73001000
+	SBREAK						// 73001000
 
 	// Arbitrary bytes (entered in little-endian mode)
 	WORD	$0x12345678	// WORD $305419896	// 78563412
