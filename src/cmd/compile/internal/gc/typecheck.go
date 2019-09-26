@@ -2747,11 +2747,6 @@ func pushtype(n *Node, t *types.Type) {
 		n.Right = typenod(t)
 		n.SetImplicit(true)       // don't print
 		n.Right.SetImplicit(true) // * is okay
-	} else if Debug['s'] != 0 {
-		n.Right = typecheck(n.Right, ctxType)
-		if n.Right.Type != nil && types.Identical(n.Right.Type, t) {
-			fmt.Printf("%v: redundant type: %v\n", n.Line(), t)
-		}
 	}
 }
 
@@ -3031,7 +3026,7 @@ func typecheckcomplit(n *Node) (res *Node) {
 
 	n.Orig = norig
 	if n.Type.IsPtr() {
-		n = nod(OPTRLIT, n, nil)
+		n = nodl(n.Pos, OPTRLIT, n, nil)
 		n.SetTypecheck(1)
 		n.Type = n.Left.Type
 		n.Left.Type = t
