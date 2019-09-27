@@ -720,9 +720,6 @@ func typefmt(t *types.Type, flag FmtFlag, mode fmtMode, depth int) string {
 		return "*" + tmodeString(t.Elem(), mode, depth)
 
 	case TARRAY:
-		if t.IsDDDArray() {
-			return "[...]" + tmodeString(t.Elem(), mode, depth)
-		}
 		return "[" + strconv.FormatInt(t.NumElem(), 10) + "]" + tmodeString(t.Elem(), mode, depth)
 
 	case TSLICE:
@@ -1304,12 +1301,8 @@ func (n *Node) exprfmt(s fmt.State, prec int, mode fmtMode) {
 
 	case OCOMPLIT:
 		if mode == FErr {
-			if n.Right != nil && n.Right.Type != nil && !n.Implicit() {
-				if n.Right.Implicit() && n.Right.Type.IsPtr() {
-					mode.Fprintf(s, "&%v literal", n.Right.Type.Elem())
-					return
-				}
-				mode.Fprintf(s, "%v literal", n.Right.Type)
+			if n.Right != nil {
+				mode.Fprintf(s, "%v literal", n.Right)
 				return
 			}
 
