@@ -31,7 +31,6 @@ type objWriter struct {
 	nData     int
 	nReloc    int
 	nPcdata   int
-	nAutom    int
 	nFuncdata int
 	nFile     int
 
@@ -60,7 +59,6 @@ func (w *objWriter) addLengths(s *LSym) {
 	w.nData += data
 	w.nPcdata += len(pc.Pcdata)
 
-	w.nAutom += len(s.Func.Autom)
 	w.nFuncdata += len(pc.Funcdataoff)
 	w.nFile += len(pc.File)
 }
@@ -69,7 +67,7 @@ func (w *objWriter) writeLengths() {
 	w.writeInt(int64(w.nData))
 	w.writeInt(int64(w.nReloc))
 	w.writeInt(int64(w.nPcdata))
-	w.writeInt(int64(w.nAutom))
+	w.writeInt(int64(0)) // TODO: remove at next object file rev
 	w.writeInt(int64(w.nFuncdata))
 	w.writeInt(int64(w.nFile))
 }
@@ -206,10 +204,6 @@ func (w *objWriter) writeRefs(s *LSym) {
 	}
 
 	if s.Type == objabi.STEXT {
-		for _, a := range s.Func.Autom {
-			w.writeRef(a.Asym, false)
-			w.writeRef(a.Gotype, false)
-		}
 		pc := &s.Func.Pcln
 		for _, d := range pc.Funcdata {
 			w.writeRef(d, false)
@@ -364,21 +358,7 @@ func (w *objWriter) writeSym(s *LSym) {
 		flags |= 1 << 4
 	}
 	w.writeInt(flags)
-	w.writeInt(int64(len(s.Func.Autom)))
-	for _, a := range s.Func.Autom {
-		w.writeRefIndex(a.Asym)
-		w.writeInt(int64(a.Aoffset))
-		if a.Name == NAME_AUTO {
-			w.writeInt(objabi.A_AUTO)
-		} else if a.Name == NAME_PARAM {
-			w.writeInt(objabi.A_PARAM)
-		} else if a.Name == NAME_DELETED_AUTO {
-			w.writeInt(objabi.A_DELETED_AUTO)
-		} else {
-			log.Fatalf("%s: invalid local variable type %d", s.Name, a.Name)
-		}
-		w.writeRefIndex(a.Gotype)
-	}
+	w.writeInt(int64(0)) // TODO: remove at next object file rev
 
 	pc := &s.Func.Pcln
 	w.writeInt(int64(len(pc.Pcsp.P)))
@@ -597,7 +577,7 @@ func (ctxt *Link) populateDWARF(curfn interface{}, s *LSym, myimportpath string)
 	var scopes []dwarf.Scope
 	var inlcalls dwarf.InlCalls
 	if ctxt.DebugInfo != nil {
-		scopes, inlcalls = ctxt.DebugInfo(s, curfn)
+		scopes, inlcalls = ctxt.DebugInfo(s, info, curfn)
 	}
 	var err error
 	dwctxt := dwCtxt{ctxt}
@@ -654,7 +634,7 @@ func (ctxt *Link) DwarfAbstractFunc(curfn interface{}, s *LSym, myimportpath str
 	if s.Func == nil {
 		s.Func = new(FuncInfo)
 	}
-	scopes, _ := ctxt.DebugInfo(s, curfn)
+	scopes, _ := ctxt.DebugInfo(s, absfn, curfn)
 	dwctxt := dwCtxt{ctxt}
 	filesym := ctxt.fileSymbol(s)
 	fnstate := dwarf.FnState{
@@ -893,7 +873,7 @@ func (ft *DwarfFixupTable) Finalize(myimportpath string, trace bool) {
 		fns[idx] = fn
 		idx++
 	}
-	sort.Sort(bySymName(fns))
+	sort.Sort(BySymName(fns))
 
 	// Should not be called during parallel portion of compilation.
 	if ft.ctxt.InParallel {
@@ -921,8 +901,8 @@ func (ft *DwarfFixupTable) Finalize(myimportpath string, trace bool) {
 	}
 }
 
-type bySymName []*LSym
+type BySymName []*LSym
 
-func (s bySymName) Len() int           { return len(s) }
-func (s bySymName) Less(i, j int) bool { return s[i].Name < s[j].Name }
-func (s bySymName) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+func (s BySymName) Len() int           { return len(s) }
+func (s BySymName) Less(i, j int) bool { return s[i].Name < s[j].Name }
+func (s BySymName) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
