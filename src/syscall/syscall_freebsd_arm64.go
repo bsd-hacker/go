@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-// Copyright 2018 The Go Authors. All rights reserved.
-=======
 // Copyright 2019 The Go Authors. All rights reserved.
->>>>>>> master
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -48,8 +44,4 @@ func sendfile(outfd int, infd int, offset *int64, count int) (written int, err e
 	return
 }
 
-<<<<<<< HEAD
-func Syscall9(trap, a1, a2, a3, a4, a5, a6, a7, a8, a9 uintptr) (r1, r2 uintptr, err Errno)
-=======
 func Syscall9(num, a1, a2, a3, a4, a5, a6, a7, a8, a9 uintptr) (r1, r2 uintptr, err Errno)
->>>>>>> master
