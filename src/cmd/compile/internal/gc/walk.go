@@ -951,7 +951,7 @@ opswitch:
 
 	case OCONV, OCONVNOP:
 		n.Left = walkexpr(n.Left, init)
-		if n.Op == OCONVNOP && Debug_checkptr != 0 && Curfn.Func.Pragma&NoCheckPtr == 0 {
+		if n.Op == OCONVNOP && checkPtr(Curfn) {
 			if n.Type.IsPtr() && n.Left.Type.Etype == TUNSAFEPTR { // unsafe.Pointer to *T
 				n = walkCheckPtrAlignment(n, init)
 				break
@@ -2392,6 +2392,9 @@ func conv(n *Node, t *types.Type) *Node {
 // convnop converts node n to type t using the OCONVNOP op
 // and typechecks the result with ctxExpr.
 func convnop(n *Node, t *types.Type) *Node {
+	if types.Identical(n.Type, t) {
+		return n
+	}
 	n = nod(OCONVNOP, n, nil)
 	n.Type = t
 	n = typecheck(n, ctxExpr)
@@ -3910,12 +3913,12 @@ func isRuneCount(n *Node) bool {
 }
 
 func walkCheckPtrAlignment(n *Node, init *Nodes) *Node {
-	if n.Type.Elem().Alignment() == 1 {
+	if n.Type.Elem().Alignment() == 1 && n.Type.Elem().Size() == 1 {
 		return n
 	}
 
 	n.Left = cheapexpr(n.Left, init)
-	init.Append(mkcall("checkptrAlignment", nil, init, n.Left, typename(n.Type.Elem())))
+	init.Append(mkcall("checkptrAlignment", nil, init, convnop(n.Left, types.Types[TUNSAFEPTR]), typename(n.Type.Elem())))
 	return n
 }
 
@@ -3956,7 +3959,7 @@ func walkCheckPtrArithmetic(n *Node, init *Nodes) *Node {
 		case OCONVNOP:
 			if n.Left.Type.Etype == TUNSAFEPTR {
 				n.Left = cheapexpr(n.Left, init)
-				originals = append(originals, n.Left)
+				originals = append(originals, convnop(n.Left, types.Types[TUNSAFEPTR]))
 			}
 		}
 	}
@@ -3968,6 +3971,12 @@ func walkCheckPtrArithmetic(n *Node, init *Nodes) *Node {
 	slice.Esc = EscNone
 	slice.SetTransient(true)
 
-	init.Append(mkcall("checkptrArithmetic", nil, init, n, slice))
+	init.Append(mkcall("checkptrArithmetic", nil, init, convnop(n, types.Types[TUNSAFEPTR]), slice))
 	return n
+}
+
+// checkPtr reports whether pointer checking should be enabled for
+// function fn.
+func checkPtr(fn *Node) bool {
+	return Debug_checkptr != 0 && fn.Func.Pragma&NoCheckPtr == 0
 }
