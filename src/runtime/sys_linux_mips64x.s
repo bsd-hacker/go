@@ -19,10 +19,9 @@
 #define SYS_read		5000
 #define SYS_write		5001
 #define SYS_close		5003
-#define SYS_pipe		5021
 #define SYS_getpid		5038
 #define SYS_kill		5060
-#define SYS_fcntl		5080
+#define SYS_fcntl		5070
 #define SYS_mmap		5009
 #define SYS_munmap		5011
 #define SYS_setitimer		5036
@@ -97,7 +96,7 @@ TEXT runtime·write1(SB),NOSPLIT|NOFRAME,$0-28
 	MOVV	$SYS_write, R2
 	SYSCALL
 	BEQ	R7, 2(PC)
-	MOVW	$-1, R2
+	SUBVU	R2, R0, R2	// caller expects negative errno
 	MOVW	R2, ret+24(FP)
 	RET
 
@@ -108,14 +107,15 @@ TEXT runtime·read(SB),NOSPLIT|NOFRAME,$0-28
 	MOVV	$SYS_read, R2
 	SYSCALL
 	BEQ	R7, 2(PC)
-	MOVW	$-1, R2
+	SUBVU	R2, R0, R2	// caller expects negative errno
 	MOVW	R2, ret+24(FP)
 	RET
 
 // func pipe() (r, w int32, errno int32)
 TEXT runtime·pipe(SB),NOSPLIT|NOFRAME,$0-12
 	MOVV	$r+0(FP), R4
-	MOVV	$SYS_pipe, R2
+	MOVV	R0, R5
+	MOVV	$SYS_pipe2, R2
 	SYSCALL
 	MOVW	R2, errno+8(FP)
 	RET
