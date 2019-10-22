@@ -8,6 +8,7 @@ package runtime
 
 import (
 	"internal/cpu"
+	"runtime/internal/atomic"
 	"unsafe"
 )
 
@@ -116,6 +117,30 @@ type timersBucket struct {
 //
 // Active timers live in heaps attached to P, in the timers field.
 // Inactive timers live there too temporarily, until they are removed.
+//
+// addtimer:
+//   timerNoStatus   -> timerWaiting
+//   anything else   -> panic: invalid value
+// deltimer:
+//   timerWaiting    -> timerDeleted
+//   timerModifiedXX -> timerDeleted
+//   timerNoStatus   -> do nothing
+//   timerDeleted    -> do nothing
+//   timerRemoving   -> do nothing
+//   timerRemoved    -> do nothing
+//   timerRunning    -> wait until status changes
+//   timerMoving     -> wait until status changes
+//   timerModifying  -> panic: concurrent deltimer/modtimer calls
+// modtimer:
+//   timerWaiting    -> timerModifying -> timerModifiedXX
+//   timerModifiedXX -> timerModifying -> timerModifiedYY
+//   timerNoStatus   -> timerWaiting
+//   timerRemoved    -> timerWaiting
+//   timerRunning    -> wait until status changes
+//   timerMoving     -> wait until status changes
+//   timerRemoving   -> wait until status changes
+//   timerDeleted    -> panic: concurrent modtimer/deltimer calls
+//   timerModifying  -> panic: concurrent modtimer calls
 
 // Values for the timer status field.
 const (
@@ -160,6 +185,9 @@ const (
 	// The timer will only have this status briefly.
 	timerMoving
 )
+
+// maxWhen is the maximum value for timer's when field.
+const maxWhen = 1<<63 - 1
 
 // Package time APIs.
 // Godoc uses the comments in package time, not these.
@@ -209,8 +237,8 @@ func startTimer(t *timer) {
 	addtimer(t)
 }
 
-// stopTimer removes t from the timer heap if it is there.
-// It returns true if t was removed, false if t wasn't even there.
+// stopTimer stops a timer.
+// It reports whether t was stopped before being run.
 //go:linkname stopTimer time.stopTimer
 func stopTimer(t *timer) bool {
 	return deltimer(t)
@@ -232,12 +260,61 @@ func goroutineReady(arg interface{}, seq uintptr) {
 	goready(arg.(*g), 0)
 }
 
+// addtimer adds a timer to the current P.
+// This should only be called with a newly created timer.
+// That avoids the risk of changing the when field of a timer in some P's heap,
+// which could cause the heap to become unsorted.
 func addtimer(t *timer) {
 	if oldTimers {
 		addtimerOld(t)
 		return
 	}
-	throw("new addtimer not yet implemented")
+
+	// when must never be negative; otherwise runtimer will overflow
+	// during its delta calculation and never expire other runtime timers.
+	if t.when < 0 {
+		t.when = maxWhen
+	}
+	if t.status != timerNoStatus {
+		badTimer()
+	}
+	t.status = timerWaiting
+
+	addInitializedTimer(t)
+}
+
+// addInitializedTimer adds an initialized timer to the current P.
+func addInitializedTimer(t *timer) {
+	when := t.when
+
+	pp := getg().m.p.ptr()
+	lock(&pp.timersLock)
+	ok := cleantimers(pp) && doaddtimer(pp, t)
+	unlock(&pp.timersLock)
+	if !ok {
+		badTimer()
+	}
+
+	wakeNetPoller(when)
+}
+
+// doaddtimer adds t to the current P's heap.
+// It reports whether it saw no problems due to races.
+// The caller must have locked the timers for pp.
+func doaddtimer(pp *p, t *timer) bool {
+	// Timers rely on the network poller, so make sure the poller
+	// has started.
+	if netpollInited == 0 {
+		netpollGenericInit()
+	}
+
+	if t.pp != 0 {
+		throw("doaddtimer: P already set in timer")
+	}
+	t.pp.set(pp)
+	i := len(pp.timers)
+	pp.timers = append(pp.timers, t)
+	return siftupTimer(pp.timers, i)
 }
 
 func addtimerOld(t *timer) {
@@ -284,14 +361,50 @@ func (tb *timersBucket) addtimerLocked(t *timer) bool {
 	return true
 }
 
-// Delete timer t from the heap.
-// Do not need to update the timerproc: if it wakes up early, no big deal.
+// deltimer deletes the timer t. It may be on some other P, so we can't
+// actually remove it from the timers heap. We can only mark it as deleted.
+// It will be removed in due course by the P whose heap it is on.
+// Reports whether the timer was removed before it was run.
 func deltimer(t *timer) bool {
 	if oldTimers {
 		return deltimerOld(t)
 	}
-	throw("no deltimer not yet implemented")
-	return false
+
+	for {
+		switch s := atomic.Load(&t.status); s {
+		case timerWaiting, timerModifiedLater:
+			if atomic.Cas(&t.status, s, timerDeleted) {
+				// Timer was not yet run.
+				return true
+			}
+		case timerModifiedEarlier:
+			tpp := t.pp.ptr()
+			if atomic.Cas(&t.status, s, timerModifying) {
+				atomic.Xadd(&tpp.adjustTimers, -1)
+				if !atomic.Cas(&t.status, timerModifying, timerDeleted) {
+					badTimer()
+				}
+				// Timer was not yet run.
+				return true
+			}
+		case timerDeleted, timerRemoving, timerRemoved:
+			// Timer was already run.
+			return false
+		case timerRunning, timerMoving:
+			// The timer is being run or moved, by a different P.
+			// Wait for it to complete.
+			osyield()
+		case timerNoStatus:
+			// Removing timer that was never added or
+			// has already been run. Also see issue 21874.
+			return false
+		case timerModifying:
+			// Simultaneous calls to deltimer and modtimer.
+			badTimer()
+		default:
+			badTimer()
+		}
+	}
 }
 
 func deltimerOld(t *timer) bool {
@@ -342,12 +455,94 @@ func (tb *timersBucket) deltimerLocked(t *timer) (removed, ok bool) {
 	return true, ok
 }
 
+// modtimer modifies an existing timer.
+// This is called by the netpoll code.
 func modtimer(t *timer, when, period int64, f func(interface{}, uintptr), arg interface{}, seq uintptr) {
 	if oldTimers {
 		modtimerOld(t, when, period, f, arg, seq)
 		return
 	}
-	throw("new modtimer not yet implemented")
+
+	if when < 0 {
+		when = maxWhen
+	}
+
+	status := uint32(timerNoStatus)
+	wasRemoved := false
+loop:
+	for {
+		switch status = atomic.Load(&t.status); status {
+		case timerWaiting, timerModifiedEarlier, timerModifiedLater:
+			if atomic.Cas(&t.status, status, timerModifying) {
+				break loop
+			}
+		case timerNoStatus, timerRemoved:
+			// Timer was already run and t is no longer in a heap.
+			// Act like addtimer.
+			wasRemoved = true
+			atomic.Store(&t.status, timerWaiting)
+			break loop
+		case timerRunning, timerRemoving, timerMoving:
+			// The timer is being run or moved, by a different P.
+			// Wait for it to complete.
+			osyield()
+		case timerDeleted:
+			// Simultaneous calls to modtimer and deltimer.
+			badTimer()
+		case timerModifying:
+			// Multiple simultaneous calls to modtimer.
+			badTimer()
+		default:
+			badTimer()
+		}
+	}
+
+	t.period = period
+	t.f = f
+	t.arg = arg
+	t.seq = seq
+
+	if wasRemoved {
+		t.when = when
+		addInitializedTimer(t)
+	} else {
+		// The timer is in some other P's heap, so we can't change
+		// the when field. If we did, the other P's heap would
+		// be out of order. So we put the new when value in the
+		// nextwhen field, and let the other P set the when field
+		// when it is prepared to resort the heap.
+		t.nextwhen = when
+
+		newStatus := uint32(timerModifiedLater)
+		if when < t.when {
+			newStatus = timerModifiedEarlier
+		}
+
+		// Update the adjustTimers field.  Subtract one if we
+		// are removing a timerModifiedEarlier, add one if we
+		// are adding a timerModifiedEarlier.
+		tpp := t.pp.ptr()
+		adjust := int32(0)
+		if status == timerModifiedEarlier {
+			adjust--
+		}
+		if newStatus == timerModifiedEarlier {
+			adjust++
+		}
+		if adjust != 0 {
+			atomic.Xadd(&tpp.adjustTimers, adjust)
+		}
+
+		// Set the new status of the timer.
+		if !atomic.Cas(&t.status, timerModifying, newStatus) {
+			badTimer()
+		}
+
+		// If the new status is earlier, wake up the poller.
+		if newStatus == timerModifiedEarlier {
+			wakeNetPoller(when)
+		}
+	}
 }
 
 func modtimerOld(t *timer, when, period int64, f func(interface{}, uintptr), arg interface{}, seq uintptr) {
@@ -455,6 +650,16 @@ func timerproc(tb *timersBucket) {
 		unlock(&tb.lock)
 		notetsleepg(&tb.waitnote, delta)
 	}
+}
+
+// cleantimers cleans up the head of the timer queue. This speeds up
+// programs that create and delete timers; leaving them in the heap
+// slows down addtimer. Reports whether no timer problems were found.
+// The caller must have locked the timers for pp.
+func cleantimers(pp *p) bool {
+	// TODO: write this.
+	throw("cleantimers")
+	return true
 }
 
 // moveTimers moves a slice of timers to pp. The slice has been taken
