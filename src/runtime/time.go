@@ -9,6 +9,7 @@ package runtime
 import (
 	"internal/cpu"
 	"runtime/internal/atomic"
+	"runtime/internal/sys"
 	"unsafe"
 )
 
@@ -1095,6 +1096,13 @@ func runtimer(pp *p, now int64) int64 {
 // runOneTimer runs a single timer.
 // The caller must have locked the timers for pp.
 func runOneTimer(pp *p, t *timer, now int64) {
+	if raceenabled {
+		if pp.timerRaceCtx == 0 {
+			pp.timerRaceCtx = racegostart(funcPC(runtimer) + sys.PCQuantum)
+		}
+		raceacquirectx(pp.timerRaceCtx, unsafe.Pointer(t))
+	}
+
 	f := t.f
 	arg := t.arg
 	seq := t.seq
@@ -1119,10 +1127,24 @@ func runOneTimer(pp *p, t *timer, now int64) {
 		}
 	}
 
+	if raceenabled {
+		// Temporarily use the P's racectx for g0.
+		gp := getg()
+		if gp.racectx != 0 {
+			throw("runOneTimer: unexpected racectx")
+		}
+		gp.racectx = pp.timerRaceCtx
+	}
+
 	// Note that since timers are locked here, f may not call
 	// addtimer or resettimer.
 
 	f(arg, seq)
+
+	if raceenabled {
+		gp := getg()
+		gp.racectx = 0
+	}
 }
 
 func timejump() *p {
@@ -1227,6 +1249,52 @@ func timejumpLocked() *g {
 }
 
 func timeSleepUntil() int64 {
+	if oldTimers {
+		return timeSleepUntilOld()
+	}
+
+	next := int64(maxWhen)
+
+	for _, pp := range allp {
+		lock(&pp.timersLock)
+		c := atomic.Load(&pp.adjustTimers)
+		for _, t := range pp.timers {
+			switch s := atomic.Load(&t.status); s {
+			case timerWaiting:
+				if t.when < next {
+					next = t.when
+				}
+			case timerModifiedEarlier, timerModifiedLater:
+				if t.nextwhen < next {
+					next = t.nextwhen
+				}
+				if s == timerModifiedEarlier {
+					c--
+				}
+			}
+			// The timers are sorted, so we only have to check
+			// the first timer for each P, unless there are
+			// some timerModifiedEarlier timers. The number
+			// of timerModifiedEarlier timers is in the adjustTimers
+			// field, used to initialize c, above.
+			//
+			// We don't worry about cases like timerModifying.
+			// New timers can show up at any time,
+			// so this function is necessarily imprecise.
+			// Do a signed check here since we aren't
+			// synchronizing the read of pp.adjustTimers
+			// with the check of a timer status.
+			if int32(c) <= 0 {
+				break
+			}
+		}
+		unlock(&pp.timersLock)
+	}
+
+	return next
+}
+
+func timeSleepUntilOld() int64 {
 	next := int64(1<<63 - 1)
 
 	// Determine minimum sleepUntil across all the timer buckets.
