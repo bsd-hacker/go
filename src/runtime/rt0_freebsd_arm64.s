@@ -1,12 +1,13 @@
-// Copyright 2015 The Go Authors. All rights reserved.
+// Copyright 2019 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 #include "textflag.h"
 
+// On FreeBSD argc/argv are passed in R0, not RSP
 TEXT _rt0_arm64_freebsd(SB),NOSPLIT|NOFRAME,$0
 	ADD	$8, R0, R1	// argv
-	MOVW	0(R0), R0	// argc
+	MOVD	0(R0), R0	// argc
 	BL	main(SB)
 
 // When building with -buildmode=c-shared, this symbol is called when the shared
@@ -35,7 +36,7 @@ TEXT _rt0_arm64_freebsd_lib(SB),NOSPLIT,$184
 	// Initialize g as null in case of using g later e.g. sigaction in cgo_sigaction.go
 	MOVD	ZR, g
 
-	MOVW	R0, _rt0_arm64_freebsd_lib_argc<>(SB)
+	MOVD	R0, _rt0_arm64_freebsd_lib_argc<>(SB)
 	MOVD	R1, _rt0_arm64_freebsd_lib_argv<>(SB)
 
 	// Synchronous initialization.
@@ -48,7 +49,9 @@ TEXT _rt0_arm64_freebsd_lib(SB),NOSPLIT,$184
 	BEQ	nocgo
 	MOVD	$_rt0_arm64_freebsd_lib_go(SB), R0
 	MOVD	$0, R1
+	SUB	$16, RSP	// reserve 16 bytes for sp-8 where fp may be saved.
 	BL	(R4)
+	ADD	$16, RSP
 	B	restore
 
 nocgo:
@@ -82,13 +85,13 @@ restore:
 	RET
 
 TEXT _rt0_arm64_freebsd_lib_go(SB),NOSPLIT,$0
-	MOVW	_rt0_arm64_freebsd_lib_argc<>(SB), R0
+	MOVD	_rt0_arm64_freebsd_lib_argc<>(SB), R0
 	MOVD	_rt0_arm64_freebsd_lib_argv<>(SB), R1
 	MOVD	$runtime·rt0_go(SB),R4
 	B       (R4)
 
-DATA _rt0_arm64_freebsd_lib_argc<>(SB)/4, $0
-GLOBL _rt0_arm64_freebsd_lib_argc<>(SB),NOPTR, $4
+DATA _rt0_arm64_freebsd_lib_argc<>(SB)/8, $0
+GLOBL _rt0_arm64_freebsd_lib_argc<>(SB),NOPTR, $8
 DATA _rt0_arm64_freebsd_lib_argv<>(SB)/8, $0
 GLOBL _rt0_arm64_freebsd_lib_argv<>(SB),NOPTR, $8
 

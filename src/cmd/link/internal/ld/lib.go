@@ -402,7 +402,7 @@ func (ctxt *Link) loadlib() {
 		lib := ctxt.Library[i]
 		if lib.Shlib == "" {
 			if ctxt.Debugvlog > 1 {
-				ctxt.Logf("%5.2f autolib: %s (from %s)\n", Cputime(), lib.File, lib.Objref)
+				ctxt.Logf("autolib: %s (from %s)\n", lib.File, lib.Objref)
 			}
 			loadobjfile(ctxt, lib)
 		}
@@ -411,7 +411,7 @@ func (ctxt *Link) loadlib() {
 	for _, lib := range ctxt.Library {
 		if lib.Shlib != "" {
 			if ctxt.Debugvlog > 1 {
-				ctxt.Logf("%5.2f autolib: %s (from %s)\n", Cputime(), lib.Shlib, lib.Objref)
+				ctxt.Logf("autolib: %s (from %s)\n", lib.Shlib, lib.Objref)
 			}
 			ldshlibsyms(ctxt, lib.Shlib)
 		}
@@ -842,7 +842,7 @@ func loadobjfile(ctxt *Link, lib *sym.Library) {
 	pkg := objabi.PathToPrefix(lib.Pkg)
 
 	if ctxt.Debugvlog > 1 {
-		ctxt.Logf("%5.2f ldobj: %s (%s)\n", Cputime(), lib.File, pkg)
+		ctxt.Logf("ldobj: %s (%s)\n", lib.File, pkg)
 	}
 	f, err := bio.Open(lib.File)
 	if err != nil {
@@ -1188,6 +1188,9 @@ func (ctxt *Link) hostlink() {
 		// ancient compatibility hacks.
 		argv = append(argv, "-Wl,--tsaware")
 
+		// Enable DEP
+		argv = append(argv, "-Wl,--nxcompat")
+
 		argv = append(argv, fmt.Sprintf("-Wl,--major-os-version=%d", PeMinimumTargetMajorVersion))
 		argv = append(argv, fmt.Sprintf("-Wl,--minor-os-version=%d", PeMinimumTargetMinorVersion))
 		argv = append(argv, fmt.Sprintf("-Wl,--major-subsystem-version=%d", PeMinimumTargetMajorVersion))
@@ -1287,6 +1290,19 @@ func (ctxt *Link) hostlink() {
 				if !bytes.Contains(out, []byte("GNU gold")) {
 					log.Fatalf("ARM external linker must be gold (issue #15696), but is not: %s", out)
 				}
+			}
+		}
+	}
+
+	if ctxt.Arch.Family == sys.ARM64 && objabi.GOOS == "freebsd" {
+		// Switch to ld.bfd on freebsd/arm64.
+		argv = append(argv, "-fuse-ld=bfd")
+
+		// Provide a useful error if ld.bfd is missing.
+		cmd := exec.Command(*flagExtld, "-fuse-ld=bfd", "-Wl,--version")
+		if out, err := cmd.CombinedOutput(); err == nil {
+			if !bytes.Contains(out, []byte("GNU ld")) {
+				log.Fatalf("ARM64 external linker must be ld.bfd (issue #35197), please install devel/binutils")
 			}
 		}
 	}
@@ -1439,7 +1455,7 @@ func (ctxt *Link) hostlink() {
 	}
 
 	if ctxt.Debugvlog != 0 {
-		ctxt.Logf("%5.2f host link:", Cputime())
+		ctxt.Logf("host link:")
 		for _, v := range argv {
 			ctxt.Logf(" %q", v)
 		}
@@ -1877,7 +1893,7 @@ func ldshlibsyms(ctxt *Link, shlib string) {
 		}
 	}
 	if ctxt.Debugvlog > 1 {
-		ctxt.Logf("%5.2f ldshlibsyms: found library with name %s at %s\n", Cputime(), shlib, libpath)
+		ctxt.Logf("ldshlibsyms: found library with name %s at %s\n", shlib, libpath)
 	}
 
 	f, err := elf.Open(libpath)
@@ -2387,7 +2403,7 @@ func genasmsym(ctxt *Link, put func(*Link, *sym.Symbol, string, SymbolType, int6
 	}
 
 	if ctxt.Debugvlog != 0 || *flagN {
-		ctxt.Logf("%5.2f symsize = %d\n", Cputime(), uint32(Symsize))
+		ctxt.Logf("symsize = %d\n", uint32(Symsize))
 	}
 }
 

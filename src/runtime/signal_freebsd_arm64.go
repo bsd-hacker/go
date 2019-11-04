@@ -1,4 +1,4 @@
-// Copyright 2018 The Go Authors. All rights reserved.
+// Copyright 2019 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -52,10 +52,10 @@ func (c *sigctxt) sp() uint64  { return c.regs().mc_gpregs.gp_sp }
 //go:nowritebarrierrec
 func (c *sigctxt) pc() uint64 { return c.regs().mc_gpregs.gp_elr }
 
-func (c *sigctxt) fault() uintptr { return uintptr(c.info.si_addr) }
+func (c *sigctxt) fault() uint64 { return c.info.si_addr }
 
 func (c *sigctxt) sigcode() uint64 { return uint64(c.info.si_code) }
-func (c *sigctxt) sigaddr() uint64 { return uint64(c.info.si_addr) }
+func (c *sigctxt) sigaddr() uint64 { return c.info.si_addr }
 
 func (c *sigctxt) set_pc(x uint64)  { c.regs().mc_gpregs.gp_elr = x }
 func (c *sigctxt) set_sp(x uint64)  { c.regs().mc_gpregs.gp_sp = x }
