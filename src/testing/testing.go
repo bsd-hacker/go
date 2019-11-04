@@ -344,6 +344,7 @@ type common struct {
 	skipped bool                // Test of benchmark has been skipped.
 	done    bool                // Test is finished and all subtests have completed.
 	helpers map[string]struct{} // functions to be skipped when writing file/line info
+	cleanup func()              // optional function to be called at the end of the test
 
 	chatty     bool   // A copy of the chatty flag.
 	finished   bool   // Test function has completed.
@@ -543,6 +544,7 @@ func fmtDuration(d time.Duration) string {
 
 // TB is the interface common to T and B.
 type TB interface {
+	Cleanup(func())
 	Error(args ...interface{})
 	Errorf(format string, args ...interface{})
 	Fail()
@@ -550,6 +552,7 @@ type TB interface {
 	Failed() bool
 	Fatal(args ...interface{})
 	Fatalf(format string, args ...interface{})
+	Helper()
 	Log(args ...interface{})
 	Logf(format string, args ...interface{})
 	Name() string
@@ -557,7 +560,6 @@ type TB interface {
 	SkipNow()
 	Skipf(format string, args ...interface{})
 	Skipped() bool
-	Helper()
 
 	// A private method to prevent users implementing the
 	// interface and so future additions to it will not
@@ -774,6 +776,32 @@ func (c *common) Helper() {
 	c.helpers[callerName(1)] = struct{}{}
 }
 
+// Cleanup registers a function to be called when the test finishes.
+// Cleanup functions will be called in last added, first called
+// order.
+func (c *common) Cleanup(f func()) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	oldCleanup := c.cleanup
+	c.cleanup = func() {
+		if oldCleanup != nil {
+			defer oldCleanup()
+		}
+		f()
+	}
+}
+
+// runCleanup is called at the end of the test.
+func (c *common) runCleanup() {
+	c.mu.Lock()
+	cleanup := c.cleanup
+	c.cleanup = nil
+	c.mu.Unlock()
+	if cleanup != nil {
+		cleanup()
+	}
+}
+
 // callerName gives the function name (qualified with a package path)
 // for the caller after skip frames (where 0 means the current function).
 func callerName(skip int) string {
@@ -860,7 +888,6 @@ func tRunner(t *T, fn func(t *T)) {
 			t.Errorf("race detected during execution of test")
 		}
 
-		t.duration += time.Since(t.start)
 		// If the test panicked, print any test output before dying.
 		err := recover()
 		signal := true
@@ -877,9 +904,19 @@ func tRunner(t *T, fn func(t *T)) {
 		}
 		if err != nil {
 			t.Fail()
-			t.report()
+			// Flush the output log up to the root before dying.
+			t.mu.Lock()
+			root := &t.common
+			for ; root.parent != nil; root = root.parent {
+				root.duration += time.Since(root.start)
+				fmt.Fprintf(root.parent.w, "--- FAIL: %s (%s)\n", root.name, fmtDuration(root.duration))
+				root.parent.mu.Lock()
+				io.Copy(root.parent.w, bytes.NewReader(root.output))
+			}
 			panic(err)
 		}
+
+		t.duration += time.Since(t.start)
 
 		if len(t.sub) > 0 {
 			// Run parallel subtests.
@@ -910,6 +947,7 @@ func tRunner(t *T, fn func(t *T)) {
 		}
 		t.signal <- signal
 	}()
+	defer t.runCleanup()
 
 	t.start = time.Now()
 	t.raceErrors = -race.Errors()

@@ -56,6 +56,14 @@ TODO
   Go 1.14 is the last Go release to support 32-bit binaries on
   macOS (the <code>darwin/386</code> port). They are no longer
   supported by macOS, starting with macOS 10.15 (Catalina).
+  Go continues to support the 64-bit <code>darwin/amd64</code> port.
+</p>
+
+<p><!-- golang.org/issue/34751 -->
+  Go 1.14 will likely be the last Go release to support 32-bit
+  binaries on iOS, iPadOS, watchOS, and tvOS
+  (the <code>darwin/arm</code> port). Go continues to support the
+  64-bit <code>darwin/arm64</code> port.
 </p>
 
 <h3 id="nacl">Native Client (NaCl)</h3>
@@ -239,6 +247,16 @@ TODO
     </p>
 
 </dl><!-- runtime -->
+
+<dl id="testing"><dt><a href="/pkg/testing/">testing</a></dt>
+  <dd>
+    <p><!-- CL 201359 -->
+       The testing package now supports cleanup functions, called after
+       a test or benchmark has finished, by calling
+       <a href="/pkg/testing#T.Cleanup"><code>T.Cleanup</code></a> or
+       <a href="/pkg/testing#B.Cleanup"><code>B.Cleanup</code></a> respectively.
+    </p>
+</dl><!-- testing -->
 
 <h3 id="minor_library_changes">Minor changes to the library</h3>
 

@@ -219,7 +219,7 @@ func stackpoolalloc(order uint8) gclinkptr {
 // Adds stack x to the free pool. Must be called with stackpool[order].item.mu held.
 func stackpoolfree(x gclinkptr, order uint8) {
 	s := spanOfUnchecked(uintptr(x))
-	if s.state != mSpanManual {
+	if s.state.get() != mSpanManual {
 		throw("freeing stack not in a stack span")
 	}
 	if s.manualFreeList.ptr() == nil {
@@ -467,7 +467,7 @@ func stackfree(stk stack) {
 		}
 	} else {
 		s := spanOfUnchecked(uintptr(v))
-		if s.state != mSpanManual {
+		if s.state.get() != mSpanManual {
 			println(hex(s.base()), v)
 			throw("bad span state")
 		}
@@ -1072,7 +1072,11 @@ func isShrinkStackSafe(gp *g) bool {
 	// The syscall might have pointers into the stack and
 	// often we don't have precise pointer maps for the innermost
 	// frames.
-	return gp.syscallsp == 0
+	//
+	// We also can't copy the stack if we're at an asynchronous
+	// safe-point because we don't have precise pointer maps for
+	// all frames.
+	return gp.syscallsp == 0 && !gp.asyncSafePoint
 }
 
 // Maybe shrink the stack being used by gp.

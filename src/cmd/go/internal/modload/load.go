@@ -22,13 +22,14 @@ import (
 	"cmd/go/internal/cfg"
 	"cmd/go/internal/imports"
 	"cmd/go/internal/modfetch"
-	"cmd/go/internal/modfile"
-	"cmd/go/internal/module"
 	"cmd/go/internal/mvs"
 	"cmd/go/internal/par"
 	"cmd/go/internal/search"
-	"cmd/go/internal/semver"
 	"cmd/go/internal/str"
+
+	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/module"
+	"golang.org/x/mod/semver"
 )
 
 // buildList is the list of modules to use for building packages.
@@ -625,6 +626,7 @@ func (ld *loader) load(roots func() []string) {
 				added[pkg.path] = true
 				numAdded++
 				if !haveMod[err.Module] {
+					fmt.Fprintf(os.Stderr, "go: found %s in %s %s\n", pkg.path, err.Module.Path, err.Module.Version)
 					haveMod[err.Module] = true
 					modAddedBy[err.Module] = pkg
 					buildList = append(buildList, err.Module)

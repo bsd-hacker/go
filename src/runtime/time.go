@@ -14,7 +14,7 @@ import (
 )
 
 // Temporary scaffolding while the new timer code is added.
-const oldTimers = true
+const oldTimers = false
 
 // Package time knows the layout of this structure.
 // If this struct changes, adjust ../time/sleep.go:/runtimeTimer.
@@ -585,9 +585,10 @@ loop:
 		case timerNoStatus, timerRemoved:
 			// Timer was already run and t is no longer in a heap.
 			// Act like addtimer.
-			wasRemoved = true
-			atomic.Store(&t.status, timerWaiting)
-			break loop
+			if atomic.Cas(&t.status, status, timerWaiting) {
+				wasRemoved = true
+				break loop
+			}
 		case timerRunning, timerRemoving, timerMoving:
 			// The timer is being run or moved, by a different P.
 			// Wait for it to complete.
@@ -687,10 +688,11 @@ func resettimer(t *timer, when int64) {
 	for {
 		switch s := atomic.Load(&t.status); s {
 		case timerNoStatus, timerRemoved:
-			atomic.Store(&t.status, timerWaiting)
-			t.when = when
-			addInitializedTimer(t)
-			return
+			if atomic.Cas(&t.status, s, timerWaiting) {
+				t.when = when
+				addInitializedTimer(t)
+				return
+			}
 		case timerDeleted:
 			if atomic.Cas(&t.status, s, timerModifying) {
 				t.nextwhen = when
@@ -989,10 +991,12 @@ func addAdjustedTimers(pp *p, moved []*timer) {
 			case timerDeleted:
 				// Timer has been deleted since we adjusted it.
 				// This timer is already out of the heap.
-				if !atomic.Cas(&t.status, s, timerRemoved) {
-					badTimer()
+				if atomic.Cas(&t.status, s, timerRemoving) {
+					if !atomic.Cas(&t.status, timerRemoving, timerRemoved) {
+						badTimer()
+					}
+					break loop
 				}
-				break loop
 			case timerModifiedEarlier, timerModifiedLater:
 				// Timer has been modified again since
 				// we adjusted it.
@@ -1007,8 +1011,8 @@ func addAdjustedTimers(pp *p, moved []*timer) {
 					if s == timerModifiedEarlier {
 						atomic.Xadd(&pp.adjustTimers, -1)
 					}
+					break loop
 				}
-				break loop
 			case timerNoStatus, timerRunning, timerRemoving, timerRemoved, timerMoving:
 				badTimer()
 			case timerModifying:
