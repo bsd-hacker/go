@@ -32,10 +32,11 @@ type mheap struct {
 	// lock must only be acquired on the system stack, otherwise a g
 	// could self-deadlock if its stack grows with the lock held.
 	lock      mutex
-	free      mTreap // free spans
-	sweepgen  uint32 // sweep generation, see comment in mspan
-	sweepdone uint32 // all spans are swept
-	sweepers  uint32 // number of active sweepone calls
+	free      mTreap    // free spans
+	pages     pageAlloc // page allocation data structure
+	sweepgen  uint32    // sweep generation, see comment in mspan
+	sweepdone uint32    // all spans are swept
+	sweepers  uint32    // number of active sweepone calls
 
 	// allspans is a slice of all mspans ever created. Each mspan
 	// appears exactly once.
@@ -89,25 +90,10 @@ type mheap struct {
 	// TODO(austin): pagesInUse should be a uintptr, but the 386
 	// compiler can't 8-byte align fields.
 
-	// Scavenger pacing parameters
-	//
-	// The two basis parameters and the scavenge ratio parallel the proportional
-	// sweeping implementation, the primary differences being that:
-	//  * Scavenging concerns itself with RSS, estimated as heapRetained()
-	//  * Rather than pacing the scavenger to the GC, it is paced to a
-	//    time-based rate computed in gcPaceScavenger.
-	//
-	// scavengeRetainedGoal represents our goal RSS.
-	//
-	// All fields must be accessed with lock.
-	//
-	// TODO(mknyszek): Consider abstracting the basis fields and the scavenge ratio
-	// into its own type so that this logic may be shared with proportional sweeping.
-	scavengeTimeBasis     int64
-	scavengeRetainedBasis uint64
-	scavengeBytesPerNS    float64
-	scavengeRetainedGoal  uint64
-	scavengeGen           uint64 // incremented on each pacing update
+	// scavengeGoal is the amount of total retained heap memory (measured by
+	// heapRetained) that the runtime will try to maintain by returning memory
+	// to the OS.
+	scavengeGoal uint64
 
 	// Page reclaimer state
 
@@ -220,10 +206,6 @@ var mheap_ mheap
 // A heapArena stores metadata for a heap arena. heapArenas are stored
 // outside of the Go heap and accessed via the mheap_.arenas index.
 //
-// This gets allocated directly from the OS, so ideally it should be a
-// multiple of the system page size. For example, avoid adding small
-// fields.
-//
 //go:notinheap
 type heapArena struct {
 	// bitmap stores the pointer/scalar bitmap for the words in
@@ -266,6 +248,18 @@ type heapArena struct {
 	// faster scanning, but we don't have 64-bit atomic bit
 	// operations.
 	pageMarks [pagesPerArena / 8]uint8
+
+	// zeroedBase marks the first byte of the first page in this
+	// arena which hasn't been used yet and is therefore already
+	// zero. zeroedBase is relative to the arena base.
+	// Increases monotonically until it hits heapArenaBytes.
+	//
+	// This field is sufficient to determine if an allocation
+	// needs to be zeroed because the page allocator follows an
+	// address-ordered first-fit policy.
+	//
+	// Reads and writes are protected by mheap_.lock.
+	zeroedBase uintptr
 }
 
 // arenaHint is a hint for where to grow the heap arenas. See
@@ -867,6 +861,10 @@ func (h *mheap) init() {
 	for i := range h.central {
 		h.central[i].mcentral.init(spanClass(i))
 	}
+
+	if !oldPageAllocator {
+		h.pages.init(&h.lock, &memstats.gc_sys)
+	}
 }
 
 // reclaim sweeps and reclaims at least npage pages into the heap.
@@ -1219,10 +1217,104 @@ func (h *mheap) setSpans(base, npage uintptr, s *mspan) {
 	}
 }
 
+// allocNeedsZero checks if the region of address space [base, base+npage*pageSize),
+// assumed to be allocated, needs to be zeroed, updating heap arena metadata for
+// future allocations.
+//
+// This must be called each time pages are allocated from the heap, even if the page
+// allocator can otherwise prove the memory it's allocating is already zero because
+// they're fresh from the operating system. It updates heapArena metadata that is
+// critical for future page allocations.
+//
+// h must be locked.
+func (h *mheap) allocNeedsZero(base, npage uintptr) (needZero bool) {
+	for npage > 0 {
+		ai := arenaIndex(base)
+		ha := h.arenas[ai.l1()][ai.l2()]
+
+		arenaBase := base % heapArenaBytes
+		if arenaBase > ha.zeroedBase {
+			// zeroedBase relies on an address-ordered first-fit allocation policy
+			// for pages. We ended up past the zeroedBase, which means we could be
+			// allocating in the middle of an arena, and so the assumption
+			// zeroedBase relies on has been violated.
+			print("runtime: base = ", hex(base), ", npages = ", npage, "\n")
+			print("runtime: ai = ", ai, ", ha.zeroedBase = ", ha.zeroedBase, "\n")
+			throw("pages considered for zeroing in the middle of an arena")
+		} else if arenaBase < ha.zeroedBase {
+			// We extended into the non-zeroed part of the
+			// arena, so this region needs to be zeroed before use.
+			//
+			// We still need to update zeroedBase for this arena, and
+			// potentially more arenas.
+			needZero = true
+		}
+
+		// Compute how far into the arena we extend into, capped
+		// at heapArenaBytes.
+		arenaLimit := arenaBase + npage*pageSize
+		if arenaLimit > heapArenaBytes {
+			arenaLimit = heapArenaBytes
+		}
+		if arenaLimit > ha.zeroedBase {
+			// This allocation extends past the zeroed section in
+			// this arena, so we should bump up the zeroedBase.
+			ha.zeroedBase = arenaLimit
+		}
+
+		// Move base forward and subtract from npage to move into
+		// the next arena, or finish.
+		base += arenaLimit - arenaBase
+		npage -= (arenaLimit - arenaBase) / pageSize
+	}
+	return
+}
+
 // Allocates a span of the given size.  h must be locked.
 // The returned span has been removed from the
 // free structures, but its state is still mSpanFree.
 func (h *mheap) allocSpanLocked(npage uintptr, stat *uint64) *mspan {
+	if oldPageAllocator {
+		return h.allocSpanLockedOld(npage, stat)
+	}
+	base, scav := h.pages.alloc(npage)
+	if base != 0 {
+		goto HaveBase
+	}
+	if !h.grow(npage) {
+		return nil
+	}
+	base, scav = h.pages.alloc(npage)
+	if base != 0 {
+		goto HaveBase
+	}
+	throw("grew heap, but no adequate free space found")
+
+HaveBase:
+	if scav != 0 {
+		// sysUsed all the pages that are actually available
+		// in the span.
+		sysUsed(unsafe.Pointer(base), npage*pageSize)
+		memstats.heap_released -= uint64(scav)
+	}
+
+	s := (*mspan)(h.spanalloc.alloc())
+	s.init(base, npage)
+	if h.allocNeedsZero(base, npage) {
+		s.needzero = 1
+	}
+	h.setSpans(s.base(), npage, s)
+
+	*stat += uint64(npage << _PageShift)
+	memstats.heap_idle -= uint64(npage << _PageShift)
+
+	return s
+}
+
+// Allocates a span of the given size.  h must be locked.
+// The returned span has been removed from the
+// free structures, but its state is still mSpanFree.
+func (h *mheap) allocSpanLockedOld(npage uintptr, stat *uint64) *mspan {
 	t := h.free.find(npage)
 	if t.valid() {
 		goto HaveSpan
@@ -1306,7 +1398,12 @@ HaveSpan:
 // h must be locked.
 func (h *mheap) grow(npage uintptr) bool {
 	ask := npage << _PageShift
+	if !oldPageAllocator {
+		// We must grow the heap in whole palloc chunks.
+		ask = alignUp(ask, pallocChunkBytes)
+	}
 
+	totalGrowth := uintptr(0)
 	nBase := alignUp(h.curArena.base+ask, physPageSize)
 	if nBase > h.curArena.end {
 		// Not enough room in the current arena. Allocate more
@@ -1327,7 +1424,12 @@ func (h *mheap) grow(npage uintptr) bool {
 			// remains of the current space and switch to
 			// the new space. This should be rare.
 			if size := h.curArena.end - h.curArena.base; size != 0 {
-				h.growAddSpan(unsafe.Pointer(h.curArena.base), size)
+				if oldPageAllocator {
+					h.growAddSpan(unsafe.Pointer(h.curArena.base), size)
+				} else {
+					h.pages.grow(h.curArena.base, size)
+				}
+				totalGrowth += size
 			}
 			// Switch to the new space.
 			h.curArena.base = uintptr(av)
@@ -1353,7 +1455,24 @@ func (h *mheap) grow(npage uintptr) bool {
 	// Grow into the current arena.
 	v := h.curArena.base
 	h.curArena.base = nBase
-	h.growAddSpan(unsafe.Pointer(v), nBase-v)
+	if oldPageAllocator {
+		h.growAddSpan(unsafe.Pointer(v), nBase-v)
+	} else {
+		h.pages.grow(v, nBase-v)
+		totalGrowth += nBase - v
+
+		// We just caused a heap growth, so scavenge down what will soon be used.
+		// By scavenging inline we deal with the failure to allocate out of
+		// memory fragments by scavenging the memory fragments that are least
+		// likely to be re-used.
+		if retained := heapRetained(); retained+uint64(totalGrowth) > h.scavengeGoal {
+			todo := totalGrowth
+			if overage := uintptr(retained + uint64(totalGrowth) - h.scavengeGoal); todo > overage {
+				todo = overage
+			}
+			h.pages.scavenge(todo, true)
+		}
+	}
 	return true
 }
 
@@ -1457,13 +1576,24 @@ func (h *mheap) freeSpanLocked(s *mspan, acctinuse, acctidle bool) {
 	if acctidle {
 		memstats.heap_idle += uint64(s.npages << _PageShift)
 	}
-	s.state.set(mSpanFree)
 
-	// Coalesce span with neighbors.
-	h.coalesce(s)
+	if oldPageAllocator {
+		s.state.set(mSpanFree)
 
-	// Insert s into the treap.
-	h.free.insert(s)
+		// Coalesce span with neighbors.
+		h.coalesce(s)
+
+		// Insert s into the treap.
+		h.free.insert(s)
+		return
+	}
+
+	// Mark the space as free.
+	h.pages.free(s.base(), s.npages)
+
+	// Free the span structure. We no longer have a use for it.
+	s.state.set(mSpanDead)
+	h.spanalloc.free(unsafe.Pointer(s))
 }
 
 // scavengeSplit takes t.span() and attempts to split off a span containing size
@@ -1561,17 +1691,17 @@ func (h *mheap) scavengeLocked(nbytes uintptr) uintptr {
 	return released
 }
 
-// scavengeIfNeededLocked calls scavengeLocked if we're currently above the
-// scavenge goal in order to prevent the mutator from out-running the
-// the scavenger.
+// scavengeIfNeededLocked scavenges memory assuming that size bytes of memory
+// will become unscavenged soon. It only scavenges enough to bring heapRetained
+// back down to the scavengeGoal.
 //
 // h must be locked.
 func (h *mheap) scavengeIfNeededLocked(size uintptr) {
-	if r := heapRetained(); r+uint64(size) > h.scavengeRetainedGoal {
+	if r := heapRetained(); r+uint64(size) > h.scavengeGoal {
 		todo := uint64(size)
 		// If we're only going to go a little bit over, just request what
 		// we actually need done.
-		if overage := r + uint64(size) - h.scavengeRetainedGoal; overage < todo {
+		if overage := r + uint64(size) - h.scavengeGoal; overage < todo {
 			todo = overage
 		}
 		h.scavengeLocked(uintptr(todo))
@@ -1588,7 +1718,12 @@ func (h *mheap) scavengeAll() {
 	gp := getg()
 	gp.m.mallocing++
 	lock(&h.lock)
-	released := h.scavengeLocked(^uintptr(0))
+	var released uintptr
+	if oldPageAllocator {
+		released = h.scavengeLocked(^uintptr(0))
+	} else {
+		released = h.pages.scavenge(^uintptr(0), true)
+	}
 	unlock(&h.lock)
 	gp.m.mallocing--
 
