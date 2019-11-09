@@ -168,6 +168,14 @@ func TestTinyAlloc(t *testing.T) {
 	}
 }
 
+func TestPageCacheLeak(t *testing.T) {
+	defer GOMAXPROCS(GOMAXPROCS(1))
+	leaked := PageCachePagesLeaked()
+	if leaked != 0 {
+		t.Fatalf("found %d leaked pages in page caches", leaked)
+	}
+}
+
 func TestPhysicalMemoryUtilization(t *testing.T) {
 	got := runTestProg(t, "testprog", "GCPhys")
 	want := "OK\n"
@@ -177,10 +185,6 @@ func TestPhysicalMemoryUtilization(t *testing.T) {
 }
 
 func TestScavengedBitsCleared(t *testing.T) {
-	if OldPageAllocator {
-		// This test is only relevant for the new page allocator.
-		return
-	}
 	var mismatches [128]BitsMismatch
 	if n, ok := CheckScavengedBitsCleared(mismatches[:]); !ok {
 		t.Errorf("uncleared scavenged bits")

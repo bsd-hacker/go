@@ -12,8 +12,6 @@ import (
 	"unsafe"
 )
 
-const OldPageAllocator = oldPageAllocator
-
 var Fadd64 = fadd64
 var Fsub64 = fsub64
 var Fmul64 = fmul64
@@ -356,15 +354,13 @@ func ReadMemStatsSlow() (base, slow MemStats) {
 			slow.BySize[i].Frees = bySize[i].Frees
 		}
 
-		if oldPageAllocator {
-			for i := mheap_.free.start(0, 0); i.valid(); i = i.next() {
-				slow.HeapReleased += uint64(i.span().released())
-			}
-		} else {
-			for i := mheap_.pages.start; i < mheap_.pages.end; i++ {
-				pg := mheap_.pages.chunks[i].scavenged.popcntRange(0, pallocChunkPages)
-				slow.HeapReleased += uint64(pg) * pageSize
-			}
+		for i := mheap_.pages.start; i < mheap_.pages.end; i++ {
+			pg := mheap_.pages.chunks[i].scavenged.popcntRange(0, pallocChunkPages)
+			slow.HeapReleased += uint64(pg) * pageSize
+		}
+		for _, p := range allp {
+			pg := sys.OnesCount64(p.pcache.scav)
+			slow.HeapReleased += uint64(pg) * pageSize
 		}
 
 		// Unused space in the current arena also counts as released space.
@@ -543,170 +539,6 @@ func MapTombstoneCheck(m map[int]int) {
 	}
 }
 
-// UnscavHugePagesSlow returns the value of mheap_.freeHugePages
-// and the number of unscavenged huge pages calculated by
-// scanning the heap.
-func UnscavHugePagesSlow() (uintptr, uintptr) {
-	var base, slow uintptr
-	// Run on the system stack to avoid deadlock from stack growth
-	// trying to acquire the heap lock.
-	systemstack(func() {
-		lock(&mheap_.lock)
-		base = mheap_.free.unscavHugePages
-		for _, s := range mheap_.allspans {
-			if s.state.get() == mSpanFree && !s.scavenged {
-				slow += s.hugePages()
-			}
-		}
-		unlock(&mheap_.lock)
-	})
-	return base, slow
-}
-
-// Span is a safe wrapper around an mspan, whose memory
-// is managed manually.
-type Span struct {
-	*mspan
-}
-
-func AllocSpan(base, npages uintptr, scavenged bool) Span {
-	var s *mspan
-	systemstack(func() {
-		lock(&mheap_.lock)
-		s = (*mspan)(mheap_.spanalloc.alloc())
-		unlock(&mheap_.lock)
-	})
-	s.init(base, npages)
-	s.scavenged = scavenged
-	return Span{s}
-}
-
-func (s *Span) Free() {
-	systemstack(func() {
-		lock(&mheap_.lock)
-		mheap_.spanalloc.free(unsafe.Pointer(s.mspan))
-		unlock(&mheap_.lock)
-	})
-	s.mspan = nil
-}
-
-func (s Span) Base() uintptr {
-	return s.mspan.base()
-}
-
-func (s Span) Pages() uintptr {
-	return s.mspan.npages
-}
-
-type TreapIterType treapIterType
-
-const (
-	TreapIterScav TreapIterType = TreapIterType(treapIterScav)
-	TreapIterHuge               = TreapIterType(treapIterHuge)
-	TreapIterBits               = treapIterBits
-)
-
-type TreapIterFilter treapIterFilter
-
-func TreapFilter(mask, match TreapIterType) TreapIterFilter {
-	return TreapIterFilter(treapFilter(treapIterType(mask), treapIterType(match)))
-}
-
-func (s Span) MatchesIter(mask, match TreapIterType) bool {
-	return treapFilter(treapIterType(mask), treapIterType(match)).matches(s.treapFilter())
-}
-
-type TreapIter struct {
-	treapIter
-}
-
-func (t TreapIter) Span() Span {
-	return Span{t.span()}
-}
-
-func (t TreapIter) Valid() bool {
-	return t.valid()
-}
-
-func (t TreapIter) Next() TreapIter {
-	return TreapIter{t.next()}
-}
-
-func (t TreapIter) Prev() TreapIter {
-	return TreapIter{t.prev()}
-}
-
-// Treap is a safe wrapper around mTreap for testing.
-//
-// It must never be heap-allocated because mTreap is
-// notinheap.
-//
-//go:notinheap
-type Treap struct {
-	mTreap
-}
-
-func (t *Treap) Start(mask, match TreapIterType) TreapIter {
-	return TreapIter{t.start(treapIterType(mask), treapIterType(match))}
-}
-
-func (t *Treap) End(mask, match TreapIterType) TreapIter {
-	return TreapIter{t.end(treapIterType(mask), treapIterType(match))}
-}
-
-func (t *Treap) Insert(s Span) {
-	// mTreap uses a fixalloc in mheap_ for treapNode
-	// allocation which requires the mheap_ lock to manipulate.
-	// Locking here is safe because the treap itself never allocs
-	// or otherwise ends up grabbing this lock.
-	systemstack(func() {
-		lock(&mheap_.lock)
-		t.insert(s.mspan)
-		unlock(&mheap_.lock)
-	})
-	t.CheckInvariants()
-}
-
-func (t *Treap) Find(npages uintptr) TreapIter {
-	return TreapIter{t.find(npages)}
-}
-
-func (t *Treap) Erase(i TreapIter) {
-	// mTreap uses a fixalloc in mheap_ for treapNode
-	// freeing which requires the mheap_ lock to manipulate.
-	// Locking here is safe because the treap itself never allocs
-	// or otherwise ends up grabbing this lock.
-	systemstack(func() {
-		lock(&mheap_.lock)
-		t.erase(i.treapIter)
-		unlock(&mheap_.lock)
-	})
-	t.CheckInvariants()
-}
-
-func (t *Treap) RemoveSpan(s Span) {
-	// See Erase about locking.
-	systemstack(func() {
-		lock(&mheap_.lock)
-		t.removeSpan(s.mspan)
-		unlock(&mheap_.lock)
-	})
-	t.CheckInvariants()
-}
-
-func (t *Treap) Size() int {
-	i := 0
-	t.mTreap.treap.walkTreap(func(t *treapNode) {
-		i++
-	})
-	return i
-}
-
-func (t *Treap) CheckInvariants() {
-	t.mTreap.treap.walkTreap(checkTreapNode)
-	t.mTreap.treap.validateInvariants()
-}
-
 func RunGetgThreadSwitchTest() {
 	// Test that getg works correctly with thread switch.
 	// With gccgo, if we generate getg inlined, the backend
@@ -856,6 +688,25 @@ func (d *PallocData) Scavenged() *PallocBits {
 // Expose fillAligned for testing.
 func FillAligned(x uint64, m uint) uint64 { return fillAligned(x, m) }
 
+// Expose pageCache for testing.
+type PageCache pageCache
+
+const PageCachePages = pageCachePages
+
+func NewPageCache(base uintptr, cache, scav uint64) PageCache {
+	return PageCache(pageCache{base: base, cache: cache, scav: scav})
+}
+func (c *PageCache) Empty() bool   { return (*pageCache)(c).empty() }
+func (c *PageCache) Base() uintptr { return (*pageCache)(c).base }
+func (c *PageCache) Cache() uint64 { return (*pageCache)(c).cache }
+func (c *PageCache) Scav() uint64  { return (*pageCache)(c).scav }
+func (c *PageCache) Alloc(npages uintptr) (uintptr, uintptr) {
+	return (*pageCache)(c).alloc(npages)
+}
+func (c *PageCache) Flush(s *PageAlloc) {
+	(*pageCache)(c).flush((*pageAlloc)(s))
+}
+
 // Expose chunk index type.
 type ChunkIdx chunkIdx
 
@@ -865,6 +716,9 @@ type PageAlloc pageAlloc
 
 func (p *PageAlloc) Alloc(npages uintptr) (uintptr, uintptr) {
 	return (*pageAlloc)(p).alloc(npages)
+}
+func (p *PageAlloc) AllocToCache() PageCache {
+	return PageCache((*pageAlloc)(p).allocToCache())
 }
 func (p *PageAlloc) Free(base, npages uintptr) {
 	(*pageAlloc)(p).free(base, npages)
@@ -1027,5 +881,22 @@ func CheckScavengedBitsCleared(mismatches []BitsMismatch) (n int, ok bool) {
 
 		getg().m.mallocing--
 	})
+	return
+}
+
+func PageCachePagesLeaked() (leaked uintptr) {
+	stopTheWorld("PageCachePagesLeaked")
+
+	// Walk over destroyed Ps and look for unflushed caches.
+	deadp := allp[len(allp):cap(allp)]
+	for _, p := range deadp {
+		// Since we're going past len(allp) we may see nil Ps.
+		// Just ignore them.
+		if p != nil {
+			leaked += uintptr(sys.OnesCount64(p.pcache.cache))
+		}
+	}
+
+	startTheWorld()
 	return
 }

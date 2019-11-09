@@ -4082,6 +4082,14 @@ func (pp *p) destroy() {
 		}
 		pp.deferpool[i] = pp.deferpoolbuf[i][:0]
 	}
+	systemstack(func() {
+		for i := 0; i < pp.mspancache.len; i++ {
+			// Safe to call since the world is stopped.
+			mheap_.spanalloc.free(unsafe.Pointer(pp.mspancache.buf[i]))
+		}
+		pp.mspancache.len = 0
+		pp.pcache.flush(&mheap_.pages)
+	})
 	freemcache(pp.mcache)
 	pp.mcache = nil
 	gfpurge(pp)

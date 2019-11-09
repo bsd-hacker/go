@@ -56,7 +56,8 @@
 package runtime
 
 import (
-	"math/bits"
+	"runtime/internal/atomic"
+	"runtime/internal/sys"
 	"unsafe"
 )
 
@@ -75,13 +76,15 @@ const (
 	// incurs an additional cost), to account for heap fragmentation and
 	// the ever-changing layout of the heap.
 	retainExtraPercent = 10
+
+	// maxPagesPerPhysPage is the maximum number of supported runtime pages per
+	// physical page, based on maxPhysPageSize.
+	maxPagesPerPhysPage = maxPhysPageSize / pageSize
 )
 
 // heapRetained returns an estimate of the current heap RSS.
-//
-// mheap_.lock must be held or the world must be stopped.
 func heapRetained() uint64 {
-	return memstats.heap_sys - memstats.heap_released
+	return atomic.Load64(&memstats.heap_sys) - atomic.Load64(&memstats.heap_released)
 }
 
 // gcPaceScavenger updates the scavenger's pacing, particularly
@@ -136,9 +139,7 @@ func gcPaceScavenger() {
 		return
 	}
 	mheap_.scavengeGoal = retainedGoal
-	if !oldPageAllocator {
-		mheap_.pages.resetScavengeAddr()
-	}
+	mheap_.pages.resetScavengeAddr()
 }
 
 // Sleep/wait state of the background scavenger.
@@ -252,22 +253,12 @@ func bgscavenge(c chan int) {
 				unlock(&mheap_.lock)
 				return
 			}
+			unlock(&mheap_.lock)
 
-			if oldPageAllocator {
-				// Scavenge one page, and measure the amount of time spent scavenging.
-				start := nanotime()
-				released = mheap_.scavengeLocked(physPageSize)
-				crit = nanotime() - start
-
-				unlock(&mheap_.lock)
-			} else {
-				unlock(&mheap_.lock)
-
-				// Scavenge one page, and measure the amount of time spent scavenging.
-				start := nanotime()
-				released = mheap_.pages.scavengeOne(physPageSize, false)
-				crit = nanotime() - start
-			}
+			// Scavenge one page, and measure the amount of time spent scavenging.
+			start := nanotime()
+			released = mheap_.pages.scavengeOne(physPageSize, false)
+			crit = nanotime() - start
 		})
 
 		if debug.gctrace > 0 {
@@ -501,7 +492,7 @@ func (s *pageAlloc) scavengeRangeLocked(ci chunkIdx, base, npages uint) {
 
 	// Update global accounting only when not in test, otherwise
 	// the runtime's accounting will be wrong.
-	memstats.heap_released += uint64(npages) * pageSize
+	mSysStatInc(&memstats.heap_released, uintptr(npages)*pageSize)
 }
 
 // fillAligned returns x but with all zeroes in m-aligned
@@ -511,7 +502,7 @@ func (s *pageAlloc) scavengeRangeLocked(ci chunkIdx, base, npages uint) {
 //
 // Note that if m == 1, this is a no-op.
 //
-// m must be a power of 2 <= 64.
+// m must be a power of 2 <= maxPagesPerPhysPage.
 func fillAligned(x uint64, m uint) uint64 {
 	apply := func(x uint64, c uint64) uint64 {
 		// The technique used it here is derived from
@@ -546,8 +537,10 @@ func fillAligned(x uint64, m uint) uint64 {
 		x = apply(x, 0x7fff7fff7fff7fff)
 	case 32:
 		x = apply(x, 0x7fffffff7fffffff)
-	case 64:
+	case 64: // == maxPagesPerPhysPage
 		x = apply(x, 0x7fffffffffffffff)
+	default:
+		throw("bad m value")
 	}
 	// Now, the top bit of each m-aligned group in x is set
 	// that group was all zero in the original x.
@@ -565,14 +558,14 @@ func fillAligned(x uint64, m uint) uint64 {
 // min pages of free-and-unscavenged memory in the region represented by this
 // pallocData.
 //
-// min must be a non-zero power of 2 <= 64.
+// min must be a non-zero power of 2 <= maxPagesPerPhysPage.
 func (m *pallocData) hasScavengeCandidate(min uintptr) bool {
 	if min&(min-1) != 0 || min == 0 {
 		print("runtime: min = ", min, "\n")
 		throw("min must be a non-zero power of 2")
-	} else if min > 64 {
+	} else if min > maxPagesPerPhysPage {
 		print("runtime: min = ", min, "\n")
-		throw("physical page sizes > 512 KiB are not supported")
+		throw("min too large")
 	}
 
 	// The goal of this search is to see if the chunk contains any free and unscavenged memory.
@@ -603,7 +596,7 @@ func (m *pallocData) hasScavengeCandidate(min uintptr) bool {
 // min indicates a hard minimum size and alignment for runs of pages. That is,
 // findScavengeCandidate will not return a region smaller than min pages in size,
 // or that is min pages or greater in size but not aligned to min. min must be
-// a non-zero power of 2 <= 64.
+// a non-zero power of 2 <= maxPagesPerPhysPage.
 //
 // max is a hint for how big of a region is desired. If max >= pallocChunkPages, then
 // findScavengeCandidate effectively returns entire free and unscavenged regions.
@@ -616,9 +609,9 @@ func (m *pallocData) findScavengeCandidate(searchIdx uint, min, max uintptr) (ui
 	if min&(min-1) != 0 || min == 0 {
 		print("runtime: min = ", min, "\n")
 		throw("min must be a non-zero power of 2")
-	} else if min > 64 {
+	} else if min > maxPagesPerPhysPage {
 		print("runtime: min = ", min, "\n")
-		throw("physical page sizes > 512 KiB are not supported")
+		throw("min too large")
 	}
 	// max is allowed to be less than min, but we need to ensure
 	// we never truncate further than min.
@@ -644,12 +637,12 @@ func (m *pallocData) findScavengeCandidate(searchIdx uint, min, max uintptr) (ui
 
 	// 1s are scavenged OR non-free => 0s are unscavenged AND free
 	x := fillAligned(m.scavenged[i]|m.pallocBits[i], uint(min))
-	z1 := uint(bits.LeadingZeros64(^x))
+	z1 := uint(sys.LeadingZeros64(^x))
 	run, end := uint(0), uint(i)*64+(64-z1)
 	if x<<z1 != 0 {
 		// After shifting out z1 bits, we still have 1s,
 		// so the run ends inside this word.
-		run = uint(bits.LeadingZeros64(x << z1))
+		run = uint(sys.LeadingZeros64(x << z1))
 	} else {
 		// After shifting out z1 bits, we have no more 1s.
 		// This means the run extends to the bottom of the
@@ -657,7 +650,7 @@ func (m *pallocData) findScavengeCandidate(searchIdx uint, min, max uintptr) (ui
 		run = 64 - z1
 		for j := i - 1; j >= 0; j-- {
 			x := fillAligned(m.scavenged[j]|m.pallocBits[j], uint(min))
-			run += uint(bits.LeadingZeros64(x))
+			run += uint(sys.LeadingZeros64(x))
 			if x != 0 {
 				// The run stopped in this word.
 				break
@@ -673,6 +666,11 @@ func (m *pallocData) findScavengeCandidate(searchIdx uint, min, max uintptr) (ui
 	}
 	start := end - size
 
+	// Each huge page is guaranteed to fit in a single palloc chunk.
+	//
+	// TODO(mknyszek): Support larger huge page sizes.
+	// TODO(mknyszek): Consider taking pages-per-huge-page as a parameter
+	// so we can write tests for this.
 	if physHugePageSize > pageSize && physHugePageSize > physPageSize {
 		// We have huge pages, so let's ensure we don't break one by scavenging
 		// over a huge page boundary. If the range [start, start+size) overlaps with
