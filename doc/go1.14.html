@@ -56,6 +56,11 @@ TODO
 
 <h3 id="darwin">Darwin</h3>
 
+<p>
+  Go 1.14 is the last release that will run on macOS 10.11 El Capitan.
+  Go 1.15 will require macOS 10.12 Sierra or later.
+</p>
+
 <p><!-- golang.org/issue/34749 -->
   Go 1.14 is the last Go release to support 32-bit binaries on
   macOS (the <code>darwin/386</code> port). They are no longer
@@ -258,6 +263,23 @@ TODO
   <code>plan9/*</code>.
 </p>
 
+<p>
+  A consequence of the implementation of preemption is that on Unix
+  systems, including Linux and macOS systems, programs built with Go
+  1.14 will receive more signals than programs built with earlier
+  releases.
+  This means that programs that use packages
+  like <a href="/pkg/syscall/"><code>syscall</code></a>
+  or <a href="https://godoc.org/golang.org/x/sys/unix"><code>golang.org/x/sys/unix</code></a>
+  will see more slow system calls fail with <code>EINTR</code> errors.
+  Those programs will have to handle those errors in some way, most
+  likely looping to try the system call again.  For more
+  information about this
+  see <a href="http://man7.org/linux/man-pages/man7/signal.7.html"><code>man
+  7 signal</code></a> for Linux systems or similar documentation for
+  other systems.
+</p>
+
 <p><!-- CL 201765, CL 195701 and many others -->
   The page allocator is more efficient and incurs significantly less
   lock contention at high values of <code>GOMAXPROCS</code>.
@@ -284,9 +306,9 @@ TODO
   This release adds <code>-d=checkptr</code> as a compile-time option
   for adding instrumentation to check that Go code is following
   <code>unsafe.Pointer</code> safety rules dynamically.
-  This option is enabled by default with the <code>-race</code>
-  or <code>-msan</code> flags, and can be disabled
-  with <code>-gcflags=-all=-d=checkptr=0</code>.
+  This option is enabled by default (except on Windows) with
+  the <code>-race</code> or <code>-msan</code> flags, and can be
+  disabled with <code>-gcflags=all=-d=checkptr=0</code>.
   Specifically, <code>-d=checkptr</code> checks the following:
 </p>
 
@@ -302,6 +324,11 @@ TODO
     into the same object.
   </li>
 </ol>
+
+<p>
+  Using <code>-d=checkptr</code> is not currently recommended on
+  Windows because it causes false alerts in the standard library.
+</p>
 
 <p><!-- CL 204338 -->
   The compiler can now emit machine-readable logs of key optimizations
@@ -439,6 +466,18 @@ TODO
     </p>
 
 </dl><!-- signal -->
+
+<dl id="sync"><dt><a href="/pkg/sync/">sync</a></dt>
+  <dd>
+    <p><!-- CL 200577 -->
+      Unlocking a highly contended <code>Mutex</code> now directly
+      yields the CPU to the next goroutine waiting for
+      that <code>Mutex</code>. This significantly improves the
+      performance of highly contended mutexes on high CPU count
+      machines.
+    </p>
+
+</dl><!-- sync -->
 
 <dl id="testing"><dt><a href="/pkg/testing/">testing</a></dt>
   <dd>

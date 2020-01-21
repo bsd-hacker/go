@@ -58,14 +58,14 @@ func jalrToSym(ctxt *obj.Link, p *obj.Prog, newprog obj.ProgAlloc, lr int16) *ob
 	p.Mark |= NEED_PCREL_ITYPE_RELOC
 	p = obj.Appendp(p, newprog)
 
-	// Leave p.To.Sym only for the CALL reloc in assemble.
+	// Leave Sym only for the CALL reloc in assemble.
 	p.As = AJALR
 	p.From.Type = obj.TYPE_REG
 	p.From.Reg = lr
+	p.From.Sym = to.Sym
 	p.Reg = 0
 	p.To.Type = obj.TYPE_REG
 	p.To.Reg = REG_TMP
-	p.To.Sym = to.Sym
 	lowerJALR(p)
 
 	return p
@@ -487,8 +487,8 @@ func rewriteMOV(ctxt *obj.Link, newprog obj.ProgAlloc, p *obj.Prog) {
 	}
 }
 
-// invertBranch inverts the condition of a conditional branch.
-func invertBranch(i obj.As) obj.As {
+// InvertBranch inverts the condition of a conditional branch.
+func InvertBranch(i obj.As) obj.As {
 	switch i {
 	case ABEQ:
 		return ABNE
@@ -503,7 +503,7 @@ func invertBranch(i obj.As) obj.As {
 	case ABGEU:
 		return ABLTU
 	default:
-		panic("invertBranch: not a branch")
+		panic("InvertBranch: not a branch")
 	}
 }
 
@@ -594,9 +594,8 @@ func preprocess(ctxt *obj.Link, cursym *obj.LSym, newprog obj.ProgAlloc) {
 	// Additional instruction rewriting. Any rewrites that change the number
 	// of instructions must occur here (before jump target resolution).
 	for p := cursym.Func.Text; p != nil; p = p.Link {
-		if p.As == obj.AGETCALLERPC {
-			// Handle AGETCALLERPC early so we can use AMOV, which is then
-			// rewritten below.
+		switch p.As {
+		case obj.AGETCALLERPC:
 			if cursym.Leaf() {
 				// MOV LR, Rd
 				p.As = AMOV
@@ -608,14 +607,6 @@ func preprocess(ctxt *obj.Link, cursym *obj.LSym, newprog obj.ProgAlloc) {
 				p.From.Type = obj.TYPE_MEM
 				p.From.Reg = REG_SP
 			}
-		}
-
-		switch p.As {
-		case AMOV, AMOVB, AMOVH, AMOVW, AMOVBU, AMOVHU, AMOVWU, AMOVF, AMOVD:
-			// Rewrite MOV pseudo-instructions. This cannot be done in
-			// progedit, as SP offsets need to be applied before we split
-			// up some of the Addrs.
-			rewriteMOV(ctxt, newprog, p)
 
 		case obj.ACALL:
 			switch p.To.Type {
@@ -663,6 +654,16 @@ func preprocess(ctxt *obj.Link, cursym *obj.LSym, newprog obj.ProgAlloc) {
 			p.Reg = dst
 			p.To.Type = obj.TYPE_REG
 			p.To.Reg = dst
+		}
+	}
+
+	// Rewrite MOV pseudo-instructions. This cannot be done in
+	// progedit, as SP offsets need to be applied before we split
+	// up some of the Addrs.
+	for p := cursym.Func.Text; p != nil; p = p.Link {
+		switch p.As {
+		case AMOV, AMOVB, AMOVH, AMOVW, AMOVBU, AMOVHU, AMOVWU, AMOVF, AMOVD:
+			rewriteMOV(ctxt, newprog, p)
 		}
 	}
 
@@ -799,7 +800,7 @@ func preprocess(ctxt *obj.Link, cursym *obj.LSym, newprog obj.ProgAlloc) {
 					jmp.To = obj.Addr{Type: obj.TYPE_BRANCH}
 					jmp.Pcond = p.Pcond
 
-					p.As = invertBranch(p.As)
+					p.As = InvertBranch(p.As)
 					p.Pcond = jmp.Link
 
 					// We may have made previous branches too long,
@@ -1004,7 +1005,7 @@ func wantImmU(p *obj.Prog, pos string, a obj.Addr, nbits uint) {
 
 func wantReg(p *obj.Prog, pos string, descr string, r, min, max int16) {
 	if r < min || r > max {
-		p.Ctxt.Diag("%v\texpected %s register in %s position but got non-%s register %s", p, descr, pos, descr, regName(int(r)))
+		p.Ctxt.Diag("%v\texpected %s register in %s position but got non-%s register %s", p, descr, pos, descr, RegName(int(r)))
 	}
 }
 
